@@ -193,6 +193,21 @@ Validated on hardware: reproduced the wrong-access-code symptom on a real P1S, a
 - `server/tests/printers-connection-drop.test.js`: new suite covering every route path that must (and must not) drop, plus the registry helper's no-op guarantees.
 - `docs/driver-authoring.md`: `dropConnection` added to the optional exports contract.
 - `docs/api.md`: connection-drop behavior noted on PUT and DELETE.
+## 2026-07-24: stuck uploading/printing jobs can be force-cancelled from the Jobs page
+
+Reported from a live two-printer Bambu farm. A dispatch uploaded a file and published the print-start command, but the printer (latched on a previous FINISH state) silently never started it. The job row sat in `printing` forever against a machine that was not printing anything. That zombie row blocked part deletion (parts refuse to delete with an active job) and had no exit: the Jobs page cancel action only accepted `queued` jobs, and the only endpoint that could touch an active job, `mark-job-failure`, decommissions the printer as a side effect. The operator's actual fix was hand-editing the database.
+
+`DELETE /api/jobs/:id` now accepts `?force=true` to cancel an `uploading` or `printing` job. The scope is deliberately tiny: the job row becomes `cancelled` with `finished_at` stamped, and nothing else happens. No `completed_qty` credit (an active job has credited nothing yet), no hold release (holds are resolved through Fleet's Set Ready / Bad Print), no printer contact (a physically running print is stopped at the printer or from Fleet). The Jobs page shows a "Force Cancel" button on uploading/printing rows, with a danger confirm that says exactly that. Rows displaying as "Awaiting Sign-off" keep no cancel button: resolving a held printer by cancelling its job would bypass the operator sign-off flow.
+
+One interaction needed guarding: the scheduler marks a job `printing` after its upload settles. If the operator force-cancelled during the transfer (uploads retry for many seconds), that write would have resurrected the cancelled job. Both post-upload writes (normal completion and the checkIfPrinting recovery path) now update only `WHERE status = 'uploading'` and treat zero changed rows as "leave it cancelled".
+
+### Changes
+- `server/routes/jobs.js`: `force` query param on DELETE; `uploading`/`printing` become cancellable with `finished_at` stamped; the 409 for other statuses hints at force; queued path byte-for-byte unchanged.
+- `server/scheduler.js` (`_executeUpload`): both status-to-printing writes guard on `status = 'uploading'` and return null when the job was cancelled mid-upload; the recovery path no longer holds the printer in that case.
+- `client/src/pages/Jobs.jsx`: "Force Cancel" on uploading/printing rows (hidden for Awaiting Sign-off), distinct danger confirm, error toast on failed cancels.
+- `server/tests/jobs-cancel.test.js`: new suite covering both modes, part-count and hold invariants, and 409/404 semantics.
+- `server/tests/scheduler-file.test.js`: 2 new tests proving a mid-upload cancel survives both post-upload write paths.
+- `docs/api.md`, `docs/web-app.md`: endpoint and Jobs page behavior documented.
 
 ## 2026-07-04: fix adding a part to a completed project couldn't be reactivated
 
