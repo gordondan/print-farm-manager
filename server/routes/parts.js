@@ -4,7 +4,28 @@ const fs      = require('fs');
 const partLedger = require('../partLedger');
 const router  = express.Router();
 
+const { normalizePrintTime } = require('../estimate-input');
+
 const GCODE_DIR = path.join(__dirname, '..', 'gcode');
+
+// Shared message so the same hint appears whether the operator is creating a part or
+// editing one.
+const PRINT_TIME_HINT =
+  'Cannot parse print time. Use formats like "2h15m", "90m", or "1:30:00".';
+
+// Turns the optional operator-typed estimate into seconds, or reports why it could not.
+// An empty value is not an error: the estimate is optional, and a part without one is
+// scheduled at the documented default block length (see server/projection.js).
+// Returns { ok: true, seconds } or { ok: false, error }.
+function resolvePrintTime(raw) {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, seconds: null };
+  const seconds = normalizePrintTime(raw);
+  if (seconds === null) return { ok: false, error: PRINT_TIME_HINT };
+  // Zero or negative is a typo, not "no estimate": a zero-length print would collapse to
+  // a block with no duration on the schedule.
+  if (seconds <= 0) return { ok: false, error: 'print_time must be greater than zero.' };
+  return { ok: true, seconds };
+}
 
 // scheduler is optional, only needed at runtime for sweepIdlePrinters when adding a part
 // reactivates a completed project. Tests pass null so there is no live scheduler dependency.
@@ -134,19 +155,25 @@ module.exports = (db, scheduler = null) => {
   });
 
   router.post('/', (req, res) => {
-    const { project_id, name, target_qty } = req.body;
+    const { project_id, name, target_qty, print_time } = req.body;
     if (!project_id || !name || !target_qty) {
       return res.status(400).json({ error: 'project_id, name, and target_qty are required' });
     }
+
+    // Optional estimated time to print. Used by the forward schedule as the block length
+    // for this part until a sliced G-code supplies a real per-model figure.
+    const printTime = resolvePrintTime(print_time);
+    if (!printTime.ok) return res.status(400).json({ error: printTime.error });
+
     const now = Date.now();
     // Place the new part at the end of the project's sort order so it gets the lowest
     // dispatch priority. The operator can drag it up if they want it printed sooner.
     const maxRow = db.prepare('SELECT MAX(sort_order) AS max FROM parts WHERE project_id = ?').get(project_id);
     const sortOrder = (maxRow?.max ?? -1) + 1;
     const result = db.prepare(`
-      INSERT INTO parts (project_id, name, target_qty, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(project_id, name, parseInt(target_qty, 10), sortOrder, now, now);
+      INSERT INTO parts (project_id, name, target_qty, sort_order, print_time_seconds, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(project_id, name, parseInt(target_qty, 10), sortOrder, printTime.seconds, now, now);
 
     // A new part always starts open and unmet, so reopen a completed project immediately
     // so it's active by the time the operator uploads G-code for the part, rather than
@@ -188,6 +215,15 @@ module.exports = (db, scheduler = null) => {
 
     const { name, target_qty, completed_qty, status } = req.body;
 
+    // print_time: present in the body wins (an empty value clears the estimate), absent
+    // keeps whatever is stored. Same convention as PUT /api/gcodes/:id.
+    let printTimeSeconds = part.print_time_seconds;
+    if ('print_time' in req.body) {
+      const resolved = resolvePrintTime(req.body.print_time);
+      if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+      printTimeSeconds = resolved.seconds;
+    }
+
     // Auto-calculate status when completed_qty is explicitly provided
     let resolvedStatus = part.status;
     if (completed_qty !== undefined) {
@@ -214,15 +250,17 @@ module.exports = (db, scheduler = null) => {
       }
       db.prepare(`
         UPDATE parts
-        SET name          = COALESCE(?, name),
-            target_qty    = COALESCE(?, target_qty),
-            status        = ?,
-            updated_at    = ?
+        SET name               = COALESCE(?, name),
+            target_qty         = COALESCE(?, target_qty),
+            status             = ?,
+            print_time_seconds = ?,
+            updated_at         = ?
         WHERE id = ?
       `).run(
         name,
         target_qty !== undefined ? parseInt(target_qty, 10) : null,
         resolvedStatus,
+        printTimeSeconds,
         now,
         req.params.id
       );

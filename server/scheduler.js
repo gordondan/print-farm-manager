@@ -2,6 +2,7 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const { getDriver } = require('./drivers');
+const { candidateSql, SCHEDULER_COLUMNS } = require('./candidate-query');
 const notifications = require('./notifications');
 const events = require('./events');
 const partLedger = require('./partLedger');
@@ -313,36 +314,10 @@ class JobScheduler extends EventEmitter {
     let gcodeFullPath = null;
 
     while (true) {
-      const excludeClause = skippedPartIds.length > 0
-        ? `AND parts.id NOT IN (${skippedPartIds.map(() => '?').join(',')})`
-        : '';
-
-      candidate = this.db.prepare(`
-        SELECT
-          parts.id          AS part_id,
-          parts.target_qty,
-          parts.completed_qty,
-          parts.project_id,
-          gcodes.id         AS gcode_id,
-          gcodes.filename,
-          gcodes.filepath,
-          gcodes.parts_per_plate,
-          gcodes.ams_slot
-        FROM parts
-        JOIN gcodes   ON gcodes.part_id    = parts.id
-        JOIN projects ON projects.id       = parts.project_id
-        WHERE parts.status    = 'open'
-          AND projects.status = 'active'
-          AND gcodes.printer_model = ?
-          AND (COALESCE(gcodes.allowed_groups, projects.allowed_groups) IS NULL OR EXISTS (
-            SELECT 1 FROM json_each(COALESCE(gcodes.allowed_groups, projects.allowed_groups)) WHERE value = ?
-          ))
-          AND (COALESCE(gcodes.required_material, projects.required_material) IS NULL OR COALESCE(gcodes.required_material, projects.required_material) = ?)
-          AND (COALESCE(gcodes.required_color, projects.required_color) IS NULL OR COALESCE(gcodes.required_color, projects.required_color) = ?)
-          ${excludeClause}
-        ORDER BY projects.priority ASC, projects.created_at ASC, parts.sort_order ASC, parts.created_at ASC
-        LIMIT 1
-      `).get(printer.model, printer.group_name, printer.loaded_material, printer.loaded_color, ...skippedPartIds);
+      // Eligibility rules and priority ordering live in server/candidate-query.js so the
+      // schedule projection asks the identical question without a second copy to drift.
+      candidate = this.db.prepare(candidateSql(SCHEDULER_COLUMNS, skippedPartIds.length))
+        .get(printer.model, printer.group_name, printer.loaded_material, printer.loaded_color, ...skippedPartIds);
 
       if (!candidate) {
         console.log(`[scheduler] No candidate found for ${printer.name} (model: ${printer.model}) — no open parts with matching G-code in an active project`);
