@@ -6,6 +6,7 @@ import Printers from './pages/Printers';
 import PrinterDetail from './pages/PrinterDetail';
 import Projects from './pages/Projects';
 import Jobs from './pages/Jobs';
+import Schedule from './pages/Schedule';
 import Settings from './pages/Settings';
 import Decommissioned from './pages/Decommissioned';
 
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/printers',       label: 'Printers',      end: true },
   { to: '/projects',       label: 'Projects' },
   { to: '/jobs',           label: 'Jobs' },
+  { to: '/schedule',       label: 'Schedule' },
   { to: '/decommissioned', label: 'Decommissioned' },
   { to: '/settings',       label: 'Settings' },
 ];
@@ -110,6 +112,7 @@ export default function App() {
             <Route path="/printers/:id"    element={<PrinterDetail />} />
             <Route path="/projects"        element={<Projects />} />
             <Route path="/jobs"            element={<Jobs />} />
+            <Route path="/schedule"        element={<Schedule />} />
             <Route path="/decommissioned"  element={<Decommissioned />} />
             <Route path="/settings"        element={<Settings />} />
           </Routes>

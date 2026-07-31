@@ -358,13 +358,17 @@ Diagnostic for the "Why isn't this printing?" button on the Projects page. Mirro
 
 ### `POST /api/parts`
 
-Required: `project_id`, `name`, `target_qty`.
+Required: `project_id`, `name`, `target_qty`. Optional: `print_time`.
+
+`print_time` is the operator's estimate of how long one plate of this part takes, stored as `parts.print_time_seconds`. It exists so the Schedule page can size this part's blocks before any sliced G-code has been uploaded. Accepts `"2h15m"`, `"90m"`, `"1:30:00"`, or a bare integer (seconds); returns `400` if non-empty and unparseable, or if it resolves to zero or less. Omitted or `""` stores `null`, which the schedule draws as a two-hour block marked "time unknown". A G-code's own `est_print_secs` always takes precedence over this value.
 
 A new part always starts `open` with `completed_qty: 0`. If the parent project's status is `completed`, it's reactivated to `active` immediately (same as `POST /api/projects/:id/reactivate`) without a separate manual reactivate step. A scheduler sweep also runs at this point, but it can't dispatch the new part itself yet: the scheduler's candidate query requires a matching G-code, and a brand-new part has none. The part becomes an actual dispatch candidate once G-code is uploaded for it (see `POST /api/gcodes/upload`, which triggers its own sweep).
 
 ### `PUT /api/parts/:id`
 
-Partial update. Accepts: `name`, `target_qty`, `completed_qty`, `status`.
+Partial update. Accepts: `name`, `target_qty`, `completed_qty`, `status`, `print_time`.
+
+**`print_time`:** same formats and validation as `POST /api/parts`. Present in the body wins, and `""` clears the estimate back to `null`; omitting the key leaves the stored value untouched. A `400` changes nothing at all, including the other fields in the same request.
 
 **`completed_qty` auto-status:** when `completed_qty` is included in the request body, `status` is recalculated server-side — `closed` if `completed_qty >= target_qty`, `open` otherwise. An explicit `status` field in the body is ignored when `completed_qty` is also present.
 
@@ -442,13 +446,21 @@ Upload a G-code file and create a DB record. `Content-Type: multipart/form-data`
 - `part_id` (required)
 - `parts_per_plate` (required)
 - `printer_model` (required) — must be a registered model ID
-- `est_print_secs` (optional) — per-plate print time in seconds
-- `material_grams` (optional) — per-plate material weight in grams
+- `est_print_secs` (optional): per-plate print time in seconds; used only as a fallback, see "Estimates read from the file" below
+- `material_grams` (optional): per-plate material weight in grams; same fallback rule
 - `ams_slot` (optional) — Bambu only
 - `allowed_groups` (optional): JSON array string e.g. `'["Rack A","Rack B"]'`; restricts dispatch to printers in one of these groups. Omitted or empty means unrestricted at the G-code level (falls back to the project's `allowed_groups`, if any; see `PUT /api/projects/:id/groups`)
 - `required_material` / `required_color` (optional): overrides the project's defaults for this G-code specifically
 
 Returns `201` with created G-code record. Returns `409` if a G-code for this `(part_id, printer_model)` combination already exists.
+
+**Estimates read from the file:** the upload is parsed for the slicer's own print time and material weight, which override the `est_print_secs` / `material_grams` form fields. The client derives those fields from the filename, and a filename convention is a weaker source than the slicer's own numbers. Sources, in order:
+
+- `.3mf`: `Metadata/slice_info.config`, written by Bambu Studio and Orca Slicer. `prediction` (whole seconds) and `weight` (grams) are read from the plate with `index` 1, the plate the Bambu driver prints.
+- `.gcode`: the footer/header comments both slicer families write: `; estimated printing time (normal mode) = 1h 13m 3s` (PrusaSlicer), `; total estimated time: 1h 13m 3s` (Orca/Bambu), and `; total filament used [g] = 45.67`.
+- `.bgcode`: not parsed. Prusa's binary container is left alone rather than guessed at, so the posted filename-derived values stand.
+
+Each field falls back independently: a file with a time but no weight keeps the posted weight. When nothing supplies a value the column stays `null`, and the Schedule page draws that part's blocks at its two-hour default. Field names and units are taken from slicer source, cited in `server/slicer-metadata.js`.
 
 **Sliced-.3mf validation:** a `.3mf` upload is inspected (ZIP central directory, no extraction) and rejected with `400` unless it contains `Metadata/plate_1.gcode`, the exact entry the Bambu driver prints. This catches two silent-failure cases at upload time: a project file saved without slicing (no G-code inside at all), and an export whose sliced plate is not plate 1. The error message tells the operator how to re-export ("Slice Plate, then File > Export > Export plate sliced file"). Non-`.3mf` uploads are not inspected.
 
@@ -463,7 +475,7 @@ Update `est_print_secs`, `material_grams`, `allowed_groups`, `required_material`
 { "print_time": "2h15m", "material_grams": "45g", "allowed_groups": "[\"Rack A\"]", "required_material": "PETG", "required_color": "Red" }
 ```
 
-`print_time` accepts the same human-readable formats as `PUT /api/parts/:id` did for `print_time`: `"2h15m"`, `"90m"`, `"1:30:00"`, bare integer (seconds). Returns `400` if non-empty and unparseable.
+`print_time` accepts the same human-readable formats as `PUT /api/parts/:id`: `"2h15m"`, `"90m"`, `"1:30:00"`, bare integer (seconds). Returns `400` if non-empty and unparseable. Both routes share one parser (`server/estimate-input.js`), so the same string means the same number on a part and on its G-code.
 
 `material_grams` accepts `"45g"`, `"45.5g"`, `"1.2kg"`, bare number. Returns `400` if non-empty and unparseable.
 
@@ -506,6 +518,100 @@ With `?force=true` (or `?force=1`), also cancels an `uploading` or `printing` jo
 ```json
 { "success": true }
 ```
+
+---
+
+## Schedule
+
+Forward-looking projection of what each printer is expected to run next. Read-only: these
+endpoints create no job rows, dispatch nothing, and never touch `completed_qty`. Design notes
+and the operator model live in [docs/schedule.md](schedule.md).
+
+### `GET /api/schedule`
+
+Optional query param `?horizon_hours=N` (default `24`, range `1` to `168`). Returns `400` if
+`N` is non-numeric or out of range.
+
+```json
+{
+  "version": "ebbf25c3e5fc5315",
+  "computed_at": 1769871783000,
+  "now": 1769871783000,
+  "horizon_hours": 24,
+  "horizon_end": 1769958183000,
+  "truncated": false,
+  "assumptions": {
+    "default_print_secs": 7200,
+    "changeover_secs": 900,
+    "staffed_start_hour": 6,
+    "staffed_end_hour": 22,
+    "tie_window_secs": 60
+  },
+  "printers": [
+    {
+      "id": 4,
+      "name": "MK4S_04",
+      "model": "mk4s",
+      "group_name": "Rack A",
+      "status": "FINISHED",
+      "is_held": 1,
+      "available_at": 1769872683000,
+      "blocked_reason": "Awaiting operator sign-off"
+    }
+  ],
+  "projects": [
+    { "id": 2, "name": "Benchy Fleet", "priority": 0, "color_index": 0 }
+  ],
+  "blocks": [
+    {
+      "id": "job-31",
+      "kind": "active",
+      "printer_id": 4,
+      "job_id": 31,
+      "job_status": "printing",
+      "part_id": 7,
+      "part_name": "Standard Benchy",
+      "project_id": 2,
+      "project_name": "Benchy Fleet",
+      "gcode_id": 12,
+      "filename": "benchy_mk4s.bgcode",
+      "parts_per_plate": 4,
+      "start": 1769864400000,
+      "end": 1769871783000,
+      "est_secs": 7383,
+      "time_source": "gcode",
+      "time_unknown": false
+    }
+  ],
+  "unscheduled": [
+    {
+      "part_id": 9,
+      "part_name": "Mini Benchy (60%)",
+      "project_name": "Benchy Fleet",
+      "remaining_qty": 12,
+      "reason": "beyond_horizon"
+    }
+  ]
+}
+```
+
+- `version`: fingerprint of the projection's inputs, the same value `GET /api/schedule/version` returns. Also seeds the tie-break shuffle, so an unchanged farm returns an identical schedule.
+- `printers[].available_at`: when this printer can start its next print, or `null` when it is not projectable at all (`OFFLINE`, `ERROR`, `PAUSED`, `UNKNOWN` with no active job).
+- `printers[].blocked_reason`: `"Awaiting operator sign-off"` for a held printer, `"Printer is X"` for an unprojectable one, otherwise absent/`null`.
+- `blocks[].kind`: `active` for a job already `uploading`/`printing` (`job_id` set), `projected` for predicted work (`job_id` null). A projected block is not a queued job and has no row in the `jobs` table.
+- `blocks[].time_source`: `gcode` (from `gcodes.est_print_secs`), `part` (from `parts.print_time_seconds`), or `default`. `time_unknown` is `true` only for `default`, which means the block is drawn at `assumptions.default_print_secs`.
+- `truncated`: `true` when open demand ran past `horizon_end` or a safety cap was hit; the leftovers appear in `unscheduled`.
+- `unscheduled[].reason`: `beyond_horizon` (extend the range to see it) or `no_eligible_printer` (use `GET /api/parts/:id/dispatch-status` for the per-part explanation).
+
+### `GET /api/schedule/version`
+
+Fingerprint of the schedule's inputs, for clients deciding whether their rendered schedule is stale.
+
+```json
+{ "version": "ebbf25c3e5fc5315" }
+```
+
+Deliberately cheap, so it can be polled far more often than the full projection. It changes when anything structural changes (printer status or hold, a job dispatched or resolved, a G-code or part estimate edited, quantities, priorities, reordering, project status, loaded filament). It does **not** change on `printers.job_progress` / `job_time_remaining`, which every poll rewrites for every printing printer: those move the leading edge of an in-progress block, which a normal refresh picks up, and treating them as staleness would leave a client permanently "recalculating".
 
 ---
 
