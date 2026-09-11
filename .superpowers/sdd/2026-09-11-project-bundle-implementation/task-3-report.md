@@ -56,3 +56,10 @@ Fix-round verification:
 - Updated the crafted regression coverage to accept exactly 512 MiB and reject 512 MiB + 1 byte; the fixture changes only central-directory metadata and allocates no large payload.
 - Syntax checks and the standalone inclusive/exclusive boundary checks passed.
 - Focused Jest remains blocked before test bodies by the host's missing Node 25 `better-sqlite3` binding.
+
+## Task 4 durability fix
+
+- Added nullable `projects.import_failures TEXT` to the new-install schema and an idempotent migration for existing databases.
+- Project-bundle imports now persist the normalized manifest failure records as JSON, including the literal `[]` for complete imports. Existing project detail/list `SELECT *` responses expose the field without route changes.
+- Added compatibility coverage for legacy projects retaining NULL and read-back coverage through both project detail and list endpoints, plus complete-import `[]` persistence.
+- Syntax checks pass. The focused Jest suite remains blocked before test bodies: all 20 tests fail while initializing `better-sqlite3` under host Node 25.

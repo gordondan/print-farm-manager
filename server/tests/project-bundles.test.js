@@ -76,6 +76,7 @@ beforeEach(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT,
+      import_failures TEXT,
       status TEXT DEFAULT 'draft',
       priority INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
@@ -151,6 +152,15 @@ test('part source columns remain nullable for existing parts', () => {
     .toEqual({ source_path: null, source_relpath: null });
 });
 
+test('legacy projects remain compatible with nullable import_failures', () => {
+  const now = Date.now();
+  const project = db.prepare('INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)')
+    .run('Legacy project', now, now);
+
+  expect(db.prepare('SELECT import_failures FROM projects WHERE id = ?').get(project.lastInsertRowid))
+    .toEqual({ import_failures: null });
+});
+
 test('imports two parts, originals, printer-specific slices, and reported failures', async () => {
   const archive = bundle({
     'manifest.json': manifest([
@@ -178,6 +188,12 @@ test('imports two parts, originals, printer-specific slices, and reported failur
   expect(res.body.project).toMatchObject({ name: 'Bracket batch', status: 'draft' });
   expect(res.body.parts).toHaveLength(2);
   expect(res.body.failures).toEqual([{ part_id: 'right-bracket-bbb222', profile_key: 'p1s', printer_model: 'p1s', detail: 'slicer exited 1', cancelled: false }]);
+  const expectedFailures = JSON.stringify(res.body.failures);
+  expect(res.body.project.import_failures).toBe(expectedFailures);
+  const detail = await request(app).get(`/api/projects/${res.body.project.id}`);
+  const list = await request(app).get('/api/projects');
+  expect(detail.body.import_failures).toBe(expectedFailures);
+  expect(list.body.find((project) => project.id === res.body.project.id).import_failures).toBe(expectedFailures);
 
   const parts = db.prepare('SELECT * FROM parts ORDER BY source_relpath').all();
   expect(parts.map(({ name, target_qty, source_relpath }) => ({ name, target_qty, source_relpath }))).toEqual([
@@ -194,6 +210,24 @@ test('imports two parts, originals, printer-specific slices, and reported failur
   ]);
   expect(fs.readFileSync(path.join(tempDir, 'gcode', gcodes[0].filepath), 'utf8')).toBe('left slice');
   expect(fs.readFileSync(path.join(tempDir, 'gcode', gcodes[1].filepath)).equals(buildSliced3mf())).toBe(true);
+});
+
+test('stores an empty failure array for a complete import', async () => {
+  const archive = bundle({
+    'manifest.json': manifest([{
+      id: 'complete-bracket-123456', name: 'Complete bracket', source_relpath: 'complete.stl', failures: [],
+      slices: [{ profile_key: 'mk4s', printer_model: 'mk4s', filename: 'complete.gcode', archive_path: 'slices/mk4s/complete-bracket-123456.gcode', parts_per_plate: 1, est_print_secs: null, material_grams: null }],
+    }]),
+    'originals/complete.stl': 'solid',
+    'slices/mk4s/complete-bracket-123456.gcode': 'G28',
+  });
+
+  const res = await request(app).post('/api/project-bundles/import').attach('file', archive, 'complete.zip');
+
+  expect(res.status).toBe(201);
+  expect(res.body.failures).toEqual([]);
+  expect(db.prepare('SELECT import_failures FROM projects WHERE id = ?').get(res.body.project.id))
+    .toEqual({ import_failures: '[]' });
 });
 
 test('imports an original larger than the metadata ZIP limit', async () => {

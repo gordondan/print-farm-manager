@@ -37,6 +37,7 @@ db.exec(`
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
     description TEXT,
+    import_failures TEXT,
     status      TEXT DEFAULT 'draft',
     priority    INTEGER DEFAULT 0,
     created_at  INTEGER NOT NULL,
@@ -110,6 +111,7 @@ try { db.exec('ALTER TABLE gcodes ADD COLUMN required_color TEXT'); } catch (_) 
 try { db.exec('ALTER TABLE projects ADD COLUMN required_material TEXT'); } catch (_) {}
 try { db.exec('ALTER TABLE projects ADD COLUMN required_color TEXT'); } catch (_) {}
 try { db.exec('ALTER TABLE projects ADD COLUMN allowed_groups TEXT'); } catch (_) {}
+try { db.exec('ALTER TABLE projects ADD COLUMN import_failures TEXT'); } catch (_) {}
 
 // Printer models — source of truth for which models this farm supports.
 // New installs start empty; operator adds models in Settings.

@@ -178,9 +178,9 @@ function importProjectBundle(db, archivePath, { projectsDir = PROJECTS_DIR, gcod
     db.transaction(() => {
       const now = Date.now();
       const result = db.prepare(`
-        INSERT INTO projects (name, status, priority, created_at, updated_at)
-        VALUES (?, 'draft', 0, ?, ?)
-      `).run(manifest.project_name.trim(), now, now);
+        INSERT INTO projects (name, import_failures, status, priority, created_at, updated_at)
+        VALUES (?, ?, 'draft', 0, ?, ?)
+      `).run(manifest.project_name.trim(), JSON.stringify(failures), now, now);
       const projectId = result.lastInsertRowid;
       managedProjectDir = path.join(projectsDir, String(projectId));
       fs.mkdirSync(projectsDir, { recursive: true });
