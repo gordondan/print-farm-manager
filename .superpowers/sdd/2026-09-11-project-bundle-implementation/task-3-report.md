@@ -42,3 +42,10 @@ Fix-round verification:
 - Node syntax checks passed for the importer, new `.3mf` validator, affected routes, and importer tests.
 - A direct smoke test passed for extracting a deflated 9 MiB artifact through the 512 MiB import limit and for accepting a valid `.3mf` / rejecting a `plate_7`-only `.3mf`.
 - `npx jest --runInBand server/tests/project-bundles.test.js` remains blocked before test bodies because the host's Node 25 runtime cannot load this repository's `better-sqlite3` binding. The test's `beforeEach` fails at `new Database(':memory:')`; this is the same Node-version mismatch documented above.
+
+## Scoped re-review fix
+
+- Added crafted central-directory regression coverage for the exact 512 MiB per-entry boundary, aggregate metadata over 1 GiB using three 400 MiB advertised entries, unsafe names, and duplicate names without allocating payloads.
+- The exact-boundary test exposed an off-by-one in the importer; the per-entry check now rejects `>= 512 MiB` while retaining the existing 1 GiB aggregate limit.
+- Node syntax checks and the standalone crafted-metadata checks pass.
+- Focused Jest still cannot initialize SQLite on this host: all 17 tests fail in `beforeEach` with the missing `better-sqlite3` Node 25 binding. No Jest test body executes.

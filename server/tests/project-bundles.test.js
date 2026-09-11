@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const { buildZip, buildSliced3mf } = require('./helpers/build-zip');
+const { validateBundle, MAX_IMPORT_ENTRY_BYTES, MAX_IMPORT_TOTAL_BYTES } = require('../project-bundle');
 
 let db;
 let app;
@@ -23,6 +24,34 @@ function manifest(parts) {
     profiles: [],
     parts,
   });
+}
+
+// Builds a tiny archive whose central directory advertises arbitrary sizes/names.
+// These tests exercise importer limits without allocating the advertised payload.
+function craftedCentralDirectoryArchive(entries) {
+  const centralParts = entries.map(({ name, uncompressedSize = 0 }) => {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const central = Buffer.alloc(46 + nameBuf.length);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(0, 20);
+    central.writeUInt32LE(uncompressedSize, 24);
+    central.writeUInt32LE(0, 42);
+    nameBuf.copy(central, 46);
+    return central;
+  });
+  const central = Buffer.concat(centralParts);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt32LE(0, 16);
+  return Buffer.concat([central, eocd]);
+}
+
+function validationDb() {
+  return { prepare() { return { all() { return [{ model_id: 'mk4s' }]; } }; } };
 }
 
 beforeEach(() => {
@@ -271,4 +300,27 @@ test('rejects an unknown printer model in a failure record', async () => {
   const res = await request(app).post('/api/project-bundles/import').attach('file', archive, 'failed.zip');
   expect(res.status).toBe(400);
   expect(res.body.error).toMatch(/Unknown model "unknown"/);
+});
+
+test('rejects a central-directory entry at the 512 MiB per-entry import limit', () => {
+  const archive = craftedCentralDirectoryArchive([{ name: 'originals/large.stl', uncompressedSize: MAX_IMPORT_ENTRY_BYTES }]);
+
+  expect(() => validateBundle(validationDb(), archive)).toThrow(/512 MiB/);
+});
+
+test('rejects aggregate central-directory size over 1 GiB without allocating payloads', () => {
+  const archive = craftedCentralDirectoryArchive([
+    { name: 'originals/one.stl', uncompressedSize: 400 * 1024 * 1024 },
+    { name: 'originals/two.stl', uncompressedSize: 400 * 1024 * 1024 },
+    { name: 'originals/three.stl', uncompressedSize: 400 * 1024 * 1024 },
+  ]);
+
+  expect(() => validateBundle(validationDb(), archive)).toThrow(/1 GiB/);
+});
+
+test.each([
+  ['an unsafe central-directory name', [{ name: '../escape.stl' }], /unsafe archive entry/],
+  ['duplicate central-directory names', [{ name: 'originals/part.stl' }, { name: 'originals/part.stl' }], /duplicate archive entry/],
+])('rejects %s before manifest parsing', (_description, entries, expectedError) => {
+  expect(() => validateBundle(validationDb(), craftedCentralDirectoryArchive(entries))).toThrow(expectedError);
 });
