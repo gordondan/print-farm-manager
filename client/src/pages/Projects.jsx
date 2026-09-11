@@ -739,6 +739,13 @@ function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamen
   return (
     <div style={{ background: '#0a0f1a', borderRadius: 6, padding: '14px 16px', marginTop: 8, display: 'flex', flexDirection: 'column', gap: 18 }}>
 
+      {part.source_relpath && (
+        <div>
+          <div style={sectionLabel}>Source STL</div>
+          <code style={{ color: '#cbd5e1', fontSize: 12 }}>{part.source_relpath}</code>
+        </div>
+      )}
+
       {/* Part name */}
       <div>
         <div style={sectionLabel}>Part Name</div>
@@ -824,7 +831,7 @@ function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamen
 
       {/* G-code files with per-gcode estimates */}
       <div>
-        <div style={sectionLabel}>G-code Files</div>
+        <div style={sectionLabel}>Printer Profiles & G-code Files</div>
         {gcodes.length === 0 && (
           <p style={{ color: '#475569', fontSize: 12, margin: 0 }}>No G-code files uploaded yet.</p>
         )}
@@ -926,6 +933,13 @@ export default function Projects() {
   const [detailProject, setDetailProject] = useState(null);
   const [parts, setParts]                 = useState([]);
   const [gcodesMap, setGcodesMap]         = useState({});
+  const [bundleFile, setBundleFile]       = useState(null);
+  const [importingBundle, setImportingBundle] = useState(false);
+  const [importPct, setImportPct]         = useState(null);
+  const [importError, setImportError]     = useState(null);
+  const [importedProjectId, setImportedProjectId] = useState(null);
+  const [importFailures, setImportFailures] = useState([]);
+  const bundleInputRef = useRef(null);
 
   // New project form
   const [showNewForm, setShowNewForm]     = useState(false);
@@ -1057,6 +1071,60 @@ export default function Projects() {
       setNewName(''); setNewDesc(''); setShowNewForm(false);
       await fetchProjects();
       showToast('Project created');
+    }
+  }
+
+  function handleBundleFileChange(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    setBundleFile(file);
+    setImportError(null);
+  }
+
+  async function importBundle() {
+    if (!bundleFile || importingBundle) return;
+    if (!bundleFile.name.toLowerCase().endsWith('.zip')) {
+      setImportError('Choose the .zip file exported by Batch Slicer.');
+      return;
+    }
+
+    setImportingBundle(true);
+    setImportPct(0);
+    setImportError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', bundleFile);
+      const { ok, data } = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/project-bundles/import');
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) setImportPct(Math.round((event.loaded / event.total) * 100));
+        };
+        xhr.onload = () => {
+          let body = {};
+          try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON error body */ }
+          resolve({ ok: xhr.status >= 200 && xhr.status < 300, data: body });
+        };
+        xhr.onerror = () => reject(new Error('Network error while importing the project bundle.'));
+        xhr.send(formData);
+      });
+      if (!ok) {
+        setImportError(data.error || 'The project bundle could not be imported.');
+        return;
+      }
+
+      setBundleFile(null);
+      if (bundleInputRef.current) bundleInputRef.current.value = '';
+      setImportedProjectId(data.project.id);
+      setImportFailures(data.failures || []);
+      await fetchProjects();
+      setSelectedId(data.project.id);
+      showToast('Sliced project imported as a draft. Activate it when you are ready to print.');
+    } catch (error) {
+      setImportError(error.message || 'The project bundle could not be imported.');
+    } finally {
+      setImportingBundle(false);
+      setImportPct(null);
     }
   }
 
@@ -1372,13 +1440,41 @@ export default function Projects() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700 }}>Projects</h1>
-          <button
-            onClick={() => setShowNewForm(v => !v)}
-            style={{ background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
-          >
-            + New Project
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <label style={{ cursor: importingBundle ? 'wait' : 'pointer' }}>
+              <input
+                ref={bundleInputRef}
+                type="file"
+                accept=".zip,application/zip"
+                onChange={handleBundleFileChange}
+                disabled={importingBundle}
+                style={{ display: 'none' }}
+              />
+              <span style={{ background: '#1f2937', color: '#cbd5e1', border: '1px solid #334155', borderRadius: 4, padding: '6px 14px', fontSize: 13, fontWeight: 600, opacity: importingBundle ? 0.6 : 1 }}>
+                {bundleFile ? bundleFile.name : 'Choose sliced project ZIP'}
+              </span>
+            </label>
+            <button
+              onClick={importBundle}
+              disabled={!bundleFile || importingBundle}
+              style={{ background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: bundleFile && !importingBundle ? 'pointer' : 'not-allowed', opacity: bundleFile && !importingBundle ? 1 : 0.55 }}
+            >
+              {importingBundle ? `Importing${importPct != null ? ` ${importPct}%` : '…'}` : 'Import sliced project'}
+            </button>
+            <button
+              onClick={() => setShowNewForm(v => !v)}
+              disabled={importingBundle}
+              style={{ background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: importingBundle ? 'not-allowed' : 'pointer', opacity: importingBundle ? 0.55 : 1 }}
+            >
+              + New Project
+            </button>
+          </div>
         </div>
+
+        <p style={{ color: '#64748b', fontSize: 12, margin: '-8px 0 16px' }}>
+          Import a Batch Slicer ZIP. Imported projects stay drafts until you activate them.
+        </p>
+        {importError && <p role="alert" style={{ color: '#f87171', fontSize: 12, margin: '-8px 0 16px' }}>{importError}</p>}
 
         {(draftCount > 0 || pausedCount > 0 || completedCount > 0) && (
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -1578,6 +1674,25 @@ export default function Projects() {
         )}
         <StatusDropdown project={detailProject} onTransition={handleStatusTransition} />
       </div>
+
+      {detailProject.id === importedProjectId && (
+        <div style={{ background: '#0f172a', border: '1px solid #1e3a5f', borderRadius: 6, color: '#93c5fd', fontSize: 12, lineHeight: 1.5, padding: '9px 12px', marginBottom: 16 }}>
+          This imported project is a draft. Uploading or importing never activates a project; activate it only when it is ready to print.
+        </div>
+      )}
+
+      {detailProject.id === importedProjectId && importFailures.length > 0 && (
+        <div style={{ background: '#2a1b08', border: '1px solid #7c5806', borderRadius: 6, color: '#fbbf24', fontSize: 12, lineHeight: 1.5, padding: '9px 12px', marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Slices that did not import</div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {importFailures.map((failure, index) => (
+              <li key={`${failure.part_id}-${failure.profile_key}-${index}`}>
+                {failure.part_id} — {failure.printer_model} ({failure.profile_key}): {failure.detail}{failure.cancelled ? ' (cancelled)' : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Project-level filament defaults */}
       {filamentTypes.length > 0 && (
