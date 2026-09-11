@@ -937,8 +937,6 @@ export default function Projects() {
   const [importingBundle, setImportingBundle] = useState(false);
   const [importPct, setImportPct]         = useState(null);
   const [importError, setImportError]     = useState(null);
-  const [importedProjectId, setImportedProjectId] = useState(null);
-  const [importFailures, setImportFailures] = useState([]);
   const bundleInputRef = useRef(null);
 
   // New project form
@@ -1115,8 +1113,6 @@ export default function Projects() {
 
       setBundleFile(null);
       if (bundleInputRef.current) bundleInputRef.current.value = '';
-      setImportedProjectId(data.project.id);
-      setImportFailures(data.failures || []);
       await fetchProjects();
       setSelectedId(data.project.id);
       showToast('Sliced project imported as a draft. Activate it when you are ready to print.');
@@ -1636,6 +1632,11 @@ export default function Projects() {
 
   let projectGroups = [];
   try { projectGroups = detailProject.allowed_groups ? JSON.parse(detailProject.allowed_groups) : []; } catch (_) {}
+  let importFailures = [];
+  try {
+    const parsedFailures = detailProject.import_failures ? JSON.parse(detailProject.import_failures) : [];
+    if (Array.isArray(parsedFailures)) importFailures = parsedFailures;
+  } catch (_) {}
 
   return (
     <div>
@@ -1675,13 +1676,13 @@ export default function Projects() {
         <StatusDropdown project={detailProject} onTransition={handleStatusTransition} />
       </div>
 
-      {detailProject.id === importedProjectId && (
+      {detailProject.status === 'draft' && (
         <div style={{ background: '#0f172a', border: '1px solid #1e3a5f', borderRadius: 6, color: '#93c5fd', fontSize: 12, lineHeight: 1.5, padding: '9px 12px', marginBottom: 16 }}>
-          This imported project is a draft. Uploading or importing never activates a project; activate it only when it is ready to print.
+          This project is a draft and will not be dispatched. Activate it when it is ready to print; importing or uploading never activates a project.
         </div>
       )}
 
-      {detailProject.id === importedProjectId && importFailures.length > 0 && (
+      {detailProject.status === 'draft' && importFailures.length > 0 && (
         <div style={{ background: '#2a1b08', border: '1px solid #7c5806', borderRadius: 6, color: '#fbbf24', fontSize: 12, lineHeight: 1.5, padding: '9px 12px', marginBottom: 16 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Slices that did not import</div>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
