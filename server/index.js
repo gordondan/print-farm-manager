@@ -95,6 +95,7 @@ const server = app.listen(PORT, () => {
   app.use('/api/projects', require('./routes/projects')(db, scheduler));
   app.use('/api/parts',    require('./routes/parts')(db, scheduler));
   app.use('/api/gcodes',   require('./routes/gcodes')(db, scheduler));
+  app.use('/api/project-bundles', require('./routes/project-bundles')(db));
 
   scheduler.start();
   poller.start();
