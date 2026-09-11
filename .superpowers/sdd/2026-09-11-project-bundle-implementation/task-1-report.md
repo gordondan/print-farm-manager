@@ -18,3 +18,10 @@
 - The first manager test command could not find Jest because the checkout had incomplete local dependencies.
 - A normal `npm ci` cannot complete under the host's Node 25 because this project is pinned to Node 22 or 23 and `better-sqlite3` has no compatible prebuild. `npm ci --ignore-scripts` installed Jest for the isolated ZIP tests. Full manager tests still require the project-supported Node version and a built `better-sqlite3` binding.
 - `docker-compose.yml` was already modified and has trailing-whitespace diagnostics. It was left unchanged.
+
+## Reviewer fix round
+
+- Added ZIP metadata-integrity checks: stored and deflated entries must decompress to exactly the central-directory `uncompressedSize`. `readEntryToFile` receives only validated bytes and therefore never creates a destination for a mismatched entry.
+- Added ZIP regression coverage for oversized entries, unsupported compression, malformed archives, and forged uncompressed-size metadata. All rejection tests verify no destination file is created.
+- Added project-bundle validation for duplicate slice profile keys and duplicate derived archive paths within a part, before the output ZIP is opened. The regression test verifies duplicate profiles leave no output archive.
+- TDD red run: the duplicate-profile Python test failed because the writer emitted a duplicate ZIP member, and the metadata-mismatch Jest test failed because `readEntry` returned forged data. The focused green run passed: Python 3 tests and Jest 6 tests.

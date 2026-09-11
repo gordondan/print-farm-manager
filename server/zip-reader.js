@@ -101,9 +101,12 @@ function readEntry(buf, name, maxBytes = MAX_ENTRY_BYTES) {
   if (dataEnd > buf.length) return null;
 
   const raw = buf.subarray(dataStart, dataEnd);
-  if (entry.method === METHOD_STORED) return Buffer.from(raw);
+  if (entry.method === METHOD_STORED) {
+    return raw.length === entry.uncompressedSize ? Buffer.from(raw) : null;
+  }
   try {
-    return zlib.inflateRawSync(raw, { maxOutputLength: maxBytes });
+    const contents = zlib.inflateRawSync(raw, { maxOutputLength: maxBytes });
+    return contents.length === entry.uncompressedSize ? contents : null;
   } catch (_) {
     return null;
   }
