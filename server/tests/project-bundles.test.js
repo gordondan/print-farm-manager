@@ -7,6 +7,7 @@ const path = require('path');
 
 const { buildZip, buildSliced3mf } = require('./helpers/build-zip');
 const { validateBundle, MAX_IMPORT_ENTRY_BYTES, MAX_IMPORT_TOTAL_BYTES } = require('../project-bundle');
+const projectBundleRoute = require('../routes/project-bundles');
 
 let db;
 let app;
@@ -368,14 +369,16 @@ test('rejects a central-directory entry one byte over the 512 MiB per-entry impo
   expect(() => validateBundle(validationDb(), archive)).toThrow(/512 MiB/);
 });
 
-test('rejects aggregate central-directory size over 1 GiB without allocating payloads', () => {
-  const archive = craftedCentralDirectoryArchive([
-    { name: 'originals/one.stl', uncompressedSize: 400 * 1024 * 1024 },
-    { name: 'originals/two.stl', uncompressedSize: 400 * 1024 * 1024 },
-    { name: 'originals/three.stl', uncompressedSize: 400 * 1024 * 1024 },
-  ]);
+test('rejects aggregate central-directory size over 4 GiB without allocating payloads', () => {
+  const archive = craftedCentralDirectoryArchive(Array.from({ length: 9 }, (_, index) => ({
+    name: `originals/part-${index}.stl`, uncompressedSize: 500 * 1024 * 1024,
+  })));
 
-  expect(() => validateBundle(validationDb(), archive)).toThrow(/1 GiB/);
+  expect(() => validateBundle(validationDb(), archive)).toThrow(/4 GiB/);
+});
+
+test('configures the project-bundle upload limit at 2 GiB', () => {
+  expect(projectBundleRoute.MAX_PROJECT_BUNDLE_UPLOAD_BYTES).toBe(2 * 1024 * 1024 * 1024);
 });
 
 test.each([

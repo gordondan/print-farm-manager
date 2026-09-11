@@ -6,6 +6,8 @@ const path = require('path');
 
 const { importProjectBundle } = require('../project-bundle');
 
+const MAX_PROJECT_BUNDLE_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+
 module.exports = (db, { uploadDir = path.join(os.tmpdir(), 'print-farm-manager-imports'), projectsDir, gcodeDir } = {}) => {
   fs.mkdirSync(uploadDir, { recursive: true });
   const upload = multer({
@@ -13,7 +15,7 @@ module.exports = (db, { uploadDir = path.join(os.tmpdir(), 'print-farm-manager-i
       destination: uploadDir,
       filename: (_req, _file, callback) => callback(null, `project-bundle-${Date.now()}-${Math.random().toString(16).slice(2)}.zip`),
     }),
-    limits: { fileSize: 500 * 1024 * 1024 },
+    limits: { fileSize: MAX_PROJECT_BUNDLE_UPLOAD_BYTES },
   });
   const router = express.Router();
 
@@ -34,3 +36,5 @@ module.exports = (db, { uploadDir = path.join(os.tmpdir(), 'print-farm-manager-i
 
   return router;
 };
+
+module.exports.MAX_PROJECT_BUNDLE_UPLOAD_BYTES = MAX_PROJECT_BUNDLE_UPLOAD_BYTES;

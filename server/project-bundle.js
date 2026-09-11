@@ -11,7 +11,7 @@ const SUPPORTED_SLICE_EXTENSIONS = new Set(['.gcode', '.bgcode', '.3mf']);
 const SAFE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SAFE_PROFILE_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_IMPORT_ENTRY_BYTES = 512 * 1024 * 1024;
-const MAX_IMPORT_TOTAL_BYTES = 1024 * 1024 * 1024;
+const MAX_IMPORT_TOTAL_BYTES = 4 * 1024 * 1024 * 1024;
 
 function invalid(message) {
   const error = new Error(message);
@@ -42,7 +42,7 @@ function readManifest(archive) {
 }
 
 function validateBundle(db, archive) {
-  if (archive.length > MAX_IMPORT_TOTAL_BYTES) throw invalid('Bundle exceeds the 1 GiB import limit');
+  if (archive.length > MAX_IMPORT_TOTAL_BYTES) throw invalid('Bundle exceeds the 4 GiB import limit');
   const entries = zip.readCentralDirectory(archive);
   if (!entries) throw invalid('Bundle is not a readable ZIP archive');
   let totalBytes = 0;
@@ -53,7 +53,7 @@ function validateBundle(db, archive) {
     entryNames.add(entry.name);
     if (entry.uncompressedSize > MAX_IMPORT_ENTRY_BYTES) throw invalid(`Bundle entry "${entry.name}" exceeds the 512 MiB limit`);
     totalBytes += entry.uncompressedSize;
-    if (totalBytes > MAX_IMPORT_TOTAL_BYTES) throw invalid('Bundle exceeds the 1 GiB uncompressed import limit');
+    if (totalBytes > MAX_IMPORT_TOTAL_BYTES) throw invalid('Bundle exceeds the 4 GiB uncompressed import limit');
   }
   const manifest = readManifest(archive);
   if (!manifest || manifest.schema_version !== 1) {

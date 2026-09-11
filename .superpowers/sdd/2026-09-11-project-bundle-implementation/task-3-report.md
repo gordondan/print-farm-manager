@@ -63,3 +63,11 @@ Fix-round verification:
 - Project-bundle imports now persist the normalized manifest failure records as JSON, including the literal `[]` for complete imports. Existing project detail/list `SELECT *` responses expose the field without route changes.
 - Added compatibility coverage for legacy projects retaining NULL and read-back coverage through both project detail and list endpoints, plus complete-import `[]` persistence.
 - Syntax checks pass. The focused Jest suite remains blocked before test bodies: all 20 tests fail while initializing `better-sqlite3` under host Node 25.
+
+## Full-bundle limit correction
+
+- Raised the multipart project-bundle upload limit from 500 MiB to 2 GiB.
+- Raised the archive byte and aggregate uncompressed limits from 1 GiB to 4 GiB.
+- Preserved the inclusive 512 MiB per-entry limit.
+- Updated regression coverage to assert the 2 GiB upload configuration and reject nine crafted 500 MiB central-directory entries (>4 GiB aggregate) without allocating their payloads.
+- Syntax checks and standalone limit/configuration checks passed. Focused Jest remains blocked before test bodies by the missing `better-sqlite3` binding under host Node 25 (21 tests fail during database setup).
