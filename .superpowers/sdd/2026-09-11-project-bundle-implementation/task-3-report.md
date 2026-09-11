@@ -49,3 +49,10 @@ Fix-round verification:
 - The exact-boundary test exposed an off-by-one in the importer; the per-entry check now rejects `>= 512 MiB` while retaining the existing 1 GiB aggregate limit.
 - Node syntax checks and the standalone crafted-metadata checks pass.
 - Focused Jest still cannot initialize SQLite on this host: all 17 tests fail in `beforeEach` with the missing `better-sqlite3` Node 25 binding. No Jest test body executes.
+
+## Boundary correction
+
+- Restored inclusive 512 MiB per-entry behavior (`>` comparison).
+- Updated the crafted regression coverage to accept exactly 512 MiB and reject 512 MiB + 1 byte; the fixture changes only central-directory metadata and allocates no large payload.
+- Syntax checks and the standalone inclusive/exclusive boundary checks passed.
+- Focused Jest remains blocked before test bodies by the host's missing Node 25 `better-sqlite3` binding.

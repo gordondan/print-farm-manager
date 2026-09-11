@@ -51,7 +51,7 @@ function validateBundle(db, archive) {
     if (!zip.isSafeEntryName(entry.name)) throw invalid(`Bundle contains an unsafe archive entry "${entry.name}"`);
     if (entryNames.has(entry.name)) throw invalid(`Bundle contains a duplicate archive entry "${entry.name}"`);
     entryNames.add(entry.name);
-    if (entry.uncompressedSize >= MAX_IMPORT_ENTRY_BYTES) throw invalid(`Bundle entry "${entry.name}" exceeds the 512 MiB limit`);
+    if (entry.uncompressedSize > MAX_IMPORT_ENTRY_BYTES) throw invalid(`Bundle entry "${entry.name}" exceeds the 512 MiB limit`);
     totalBytes += entry.uncompressedSize;
     if (totalBytes > MAX_IMPORT_TOTAL_BYTES) throw invalid('Bundle exceeds the 1 GiB uncompressed import limit');
   }

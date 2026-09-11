@@ -50,6 +50,20 @@ function craftedCentralDirectoryArchive(entries) {
   return Buffer.concat([central, eocd]);
 }
 
+function setCentralDirectorySize(archive, entryName, size) {
+  let offset = 0;
+  while ((offset = archive.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), offset)) !== -1) {
+    const nameLength = archive.readUInt16LE(offset + 28);
+    const name = archive.toString('utf8', offset + 46, offset + 46 + nameLength);
+    if (name === entryName) {
+      archive.writeUInt32LE(size, offset + 24);
+      return;
+    }
+    offset += 46 + nameLength;
+  }
+  throw new Error(`central-directory entry not found: ${entryName}`);
+}
+
 function validationDb() {
   return { prepare() { return { all() { return [{ model_id: 'mk4s' }]; } }; } };
 }
@@ -302,8 +316,20 @@ test('rejects an unknown printer model in a failure record', async () => {
   expect(res.body.error).toMatch(/Unknown model "unknown"/);
 });
 
-test('rejects a central-directory entry at the 512 MiB per-entry import limit', () => {
-  const archive = craftedCentralDirectoryArchive([{ name: 'originals/large.stl', uncompressedSize: MAX_IMPORT_ENTRY_BYTES }]);
+test('accepts a central-directory entry exactly at the 512 MiB per-entry import limit', () => {
+  const archive = buildZip({
+    'manifest.json': manifest([{
+      id: 'exact-bracket-123456', name: 'Exact bracket', source_relpath: 'exact.stl', failures: [], slices: [],
+    }]),
+    'originals/exact.stl': 'solid',
+  });
+  setCentralDirectorySize(archive, 'originals/exact.stl', MAX_IMPORT_ENTRY_BYTES);
+
+  expect(() => validateBundle(validationDb(), archive)).not.toThrow();
+});
+
+test('rejects a central-directory entry one byte over the 512 MiB per-entry import limit', () => {
+  const archive = craftedCentralDirectoryArchive([{ name: 'originals/large.stl', uncompressedSize: MAX_IMPORT_ENTRY_BYTES + 1 }]);
 
   expect(() => validateBundle(validationDb(), archive)).toThrow(/512 MiB/);
 });
