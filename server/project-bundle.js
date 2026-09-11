@@ -3,12 +3,15 @@ const os = require('os');
 const path = require('path');
 
 const zip = require('./zip-reader');
+const { validateSliced3mf } = require('./sliced-3mf');
 
 const PROJECTS_DIR = path.join(__dirname, 'projects');
 const GCODE_DIR = path.join(__dirname, 'gcode');
 const SUPPORTED_SLICE_EXTENSIONS = new Set(['.gcode', '.bgcode', '.3mf']);
 const SAFE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SAFE_PROFILE_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const MAX_IMPORT_ENTRY_BYTES = 512 * 1024 * 1024;
+const MAX_IMPORT_TOTAL_BYTES = 1024 * 1024 * 1024;
 
 function invalid(message) {
   const error = new Error(message);
@@ -39,9 +42,19 @@ function readManifest(archive) {
 }
 
 function validateBundle(db, archive) {
-  const entries = zip.listEntryNames(archive);
+  if (archive.length > MAX_IMPORT_TOTAL_BYTES) throw invalid('Bundle exceeds the 1 GiB import limit');
+  const entries = zip.readCentralDirectory(archive);
   if (!entries) throw invalid('Bundle is not a readable ZIP archive');
-  const entryNames = new Set(entries);
+  let totalBytes = 0;
+  const entryNames = new Set();
+  for (const entry of entries) {
+    if (!zip.isSafeEntryName(entry.name)) throw invalid(`Bundle contains an unsafe archive entry "${entry.name}"`);
+    if (entryNames.has(entry.name)) throw invalid(`Bundle contains a duplicate archive entry "${entry.name}"`);
+    entryNames.add(entry.name);
+    if (entry.uncompressedSize > MAX_IMPORT_ENTRY_BYTES) throw invalid(`Bundle entry "${entry.name}" exceeds the 512 MiB limit`);
+    totalBytes += entry.uncompressedSize;
+    if (totalBytes > MAX_IMPORT_TOTAL_BYTES) throw invalid('Bundle exceeds the 1 GiB uncompressed import limit');
+  }
   const manifest = readManifest(archive);
   if (!manifest || manifest.schema_version !== 1) {
     throw invalid('Unsupported project bundle schema_version; expected 1');
@@ -117,6 +130,9 @@ function validateBundle(db, archive) {
           typeof failure.printer_model !== 'string' || typeof failure.detail !== 'string') {
         throw invalid(`Part ${part.id} has an invalid failure record`);
       }
+      if (!knownModels.has(failure.printer_model)) {
+        throw invalid(`Unknown model "${failure.printer_model}". Add it in Settings → Printer Models first.`);
+      }
       profileKeys.add(failure.profile_key);
       failures.push({ part_id: part.id, profile_key: failure.profile_key, printer_model: failure.printer_model,
         detail: failure.detail, cancelled: Boolean(failure.cancelled) });
@@ -141,13 +157,17 @@ function importProjectBundle(db, archivePath, { projectsDir = PROJECTS_DIR, gcod
     // Fully extract to staging before any database row or managed file exists.
     for (const part of manifest.parts) {
       const originalDestination = path.join(stagingDir, 'originals', ...part.source_relpath.split('/'));
-      if (!zip.readEntryToFile(archive, `originals/${part.source_relpath}`, originalDestination)) {
+      if (!zip.readEntryToFile(archive, `originals/${part.source_relpath}`, originalDestination, MAX_IMPORT_ENTRY_BYTES)) {
         throw invalid(`Could not extract original "originals/${part.source_relpath}"`);
       }
       for (const slice of part.slices) {
         const destination = path.join(stagingDir, 'slices', `${part.id}-${slice.profile_key}${path.posix.extname(slice.archive_path).toLowerCase()}`);
-        if (!zip.readEntryToFile(archive, slice.archive_path, destination)) {
+        if (!zip.readEntryToFile(archive, slice.archive_path, destination, MAX_IMPORT_ENTRY_BYTES)) {
           throw invalid(`Could not extract slice "${slice.archive_path}"`);
+        }
+        if (path.posix.extname(slice.archive_path).toLowerCase() === '.3mf') {
+          const sliceError = validateSliced3mf(destination);
+          if (sliceError) throw invalid(sliceError);
         }
         slice._stagedPath = destination;
       }
@@ -202,4 +222,4 @@ function importProjectBundle(db, archivePath, { projectsDir = PROJECTS_DIR, gcod
   }
 }
 
-module.exports = { importProjectBundle, validateBundle, safeRelativePath };
+module.exports = { importProjectBundle, validateBundle, safeRelativePath, MAX_IMPORT_ENTRY_BYTES, MAX_IMPORT_TOTAL_BYTES };

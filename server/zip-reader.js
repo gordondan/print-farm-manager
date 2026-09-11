@@ -139,5 +139,5 @@ function isSafeEntryName(name) {
 }
 
 module.exports = {
-  readCentralDirectory, listEntryNames, readEntry, readEntryToFile, MAX_ENTRY_BYTES,
+  readCentralDirectory, listEntryNames, readEntry, readEntryToFile, isSafeEntryName, MAX_ENTRY_BYTES,
 };
