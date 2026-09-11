@@ -11,6 +11,8 @@
 // upload handlers: "this file is not readable" is a 400 with an instructive message,
 // never a 500.
 
+const fs = require('fs');
+const path = require('path');
 const zlib = require('zlib');
 
 const EOCD_SIG    = 0x06054b50; // end of central directory
@@ -107,4 +109,32 @@ function readEntry(buf, name, maxBytes = MAX_ENTRY_BYTES) {
   }
 }
 
-module.exports = { readCentralDirectory, listEntryNames, readEntry, MAX_ENTRY_BYTES };
+// Extract one entry after validating both its archive path and decompressed content.
+// Destination is supplied by the importer, which owns the managed storage root.
+function readEntryToFile(buf, name, destination, maxBytes = MAX_ENTRY_BYTES) {
+  if (!isSafeEntryName(name) || typeof destination !== 'string' || !destination) return null;
+
+  const contents = readEntry(buf, name, maxBytes);
+  if (contents === null || contents.length > maxBytes) return null;
+
+  try {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, contents);
+    return destination;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isSafeEntryName(name) {
+  if (typeof name !== 'string' || !name || name.includes('\0')) return false;
+  if (name.startsWith('/') || name.startsWith('\\')) return false;
+  const components = name.replace(/\\/g, '/').split('/');
+  return components.every(component =>
+    component !== '' && component !== '.' && component !== '..' && !component.includes(':')
+  );
+}
+
+module.exports = {
+  readCentralDirectory, listEntryNames, readEntry, readEntryToFile, MAX_ENTRY_BYTES,
+};
