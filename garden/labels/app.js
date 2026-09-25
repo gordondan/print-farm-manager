@@ -141,7 +141,7 @@ scene.add(kitGroup);
 function applyTheme() {
   const dark = gardenTheme || matchMedia('(prefers-color-scheme: dark)').matches;
   scene.background = new THREE.Color(gardenTheme ? 0x0f1420 : dark ? 0x242428 : 0xe9eae6);
-  grid.material.color = new THREE.Color(dark ? 0x55555c : 0x9a9a94);
+  grid.material.color = new THREE.Color(gardenTheme ? 0x64748b : dark ? 0x55555c : 0x9a9a94);
 }
 applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
