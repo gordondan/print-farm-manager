@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multibin Label Generator</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js" } }
+  </script>
+</head>
+<body>
+  <main class="app">
+    <aside class="panel">
+      <header>
+        <h1>Multibin Labels</h1>
+        <p class="sub">Raised-text labels as STL or 3MF</p>
+      </header>
+
+      <section>
+        <div class="tabs" role="tablist">
+          <button role="tab" data-mode="single" aria-selected="true">Single</button>
+          <button role="tab" data-mode="batch" aria-selected="false">Batch</button>
+        </div>
+        <div id="single-input">
+          <label for="text">Label text</label>
+          <input id="text" type="text" value="M5 Bolts" autocomplete="off" spellcheck="false">
+        </div>
+        <div id="batch-input" hidden>
+          <label for="batch">One label per line <span class="hint"># lines are comments</span></label>
+          <textarea id="batch" rows="8" spellcheck="false">SD Cards
+M5 Bolts
+Threaded Inserts</textarea>
+          <div class="row">
+            <button id="load-file" class="ghost">Load .txt…</button>
+            <input id="file" type="file" accept=".txt,text/plain" hidden>
+            <span id="batch-count" class="hint"></span>
+          </div>
+          <label for="preview-pick">Preview</label>
+          <select id="preview-pick"></select>
+        </div>
+      </section>
+
+      <section>
+        <span class="label">Size</span>
+        <div class="seg" id="sizes"></div>
+        <div id="custom" class="row" hidden>
+          <label class="inline">Length <input id="custom-l" type="number" min="5" step="0.5" value="78"> mm</label>
+          <label class="inline">Width <input id="custom-w" type="number" min="5" step="0.5" value="12"> mm</label>
+        </div>
+        <p id="size-note" class="hint"></p>
+      </section>
+
+      <section>
+        <span class="label">Parts</span>
+        <label class="check"><input type="checkbox" checked disabled> Label + text</label>
+        <label class="check"><input id="holder" type="checkbox"> Magnetic holder <span id="holder-note" class="hint"></span></label>
+        <label class="check"><input id="rail" type="checkbox"> Bin clip (rail)</label>
+      </section>
+
+      <section>
+        <label for="font">Font</label>
+        <select id="font">
+          <option value="fonts/Arimo-Regular.woff">Arimo (Arial-compatible)</option>
+          <option value="fonts/Arimo-Bold.woff">Arimo Bold</option>
+          <option value="upload">Upload font…</option>
+        </select>
+        <input id="font-file" type="file" accept=".ttf,.otf,.woff" hidden>
+        <details>
+          <summary>Advanced</summary>
+          <label class="inline">Text fill <input id="fill" type="range" min="40" max="95" value="75"> <output id="fill-out">75%</output></label>
+          <label class="inline">Text height <input id="text-depth" type="number" min="0.2" step="0.1" value="0.4"> mm</label>
+          <label class="inline">Label thickness <input id="thickness" type="number" min="0.2" step="0.1" value="0.4"> mm</label>
+        </details>
+      </section>
+
+      <section class="actions">
+        <button id="dl-stl" class="primary">Download STL</button>
+        <button id="dl-parts">Parts as separate STLs (.zip)</button>
+        <button id="dl-3mf">Colored 3MF (Bambu)</button>
+        <p id="status" class="hint" role="status"></p>
+      </section>
+    </aside>
+
+    <section class="viewer">
+      <canvas id="view"></canvas>
+      <div id="dims" class="dims"></div>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

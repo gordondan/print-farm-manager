@@ -1,0 +1,112 @@
+:root {
+  --bg: #f4f4f2;
+  --panel: #ffffff;
+  --ink: #1d1d1f;
+  --muted: #6b6b70;
+  --line: #e2e2de;
+  --accent: #2f6fde;
+  --accent-ink: #ffffff;
+  --viewer: #e9eae6;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161618;
+    --panel: #1f1f22;
+    --ink: #ececef;
+    --muted: #9a9aa2;
+    --line: #34343a;
+    --accent: #5b8ff0;
+    --accent-ink: #0d0d0f;
+    --viewer: #242428;
+    color-scheme: dark;
+  }
+}
+
+/* Embedded in Print Garden (?embed): match its dark shell. */
+:root[data-theme=garden] {
+  --bg: #0a0f1a;
+  --panel: #131720;
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --line: #1e2433;
+  --accent: #1e40af;
+  --accent-ink: #ffffff;
+  --viewer: #0f1420;
+  color-scheme: dark;
+}
+:root[data-theme=garden] .app { height: 100vh; }
+:root[data-theme=garden] .panel { border-right-color: #1e2433; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+.panel {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+header h1 { font-size: 18px; margin: 0; }
+.sub { margin: 2px 0 0; color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 8px; }
+
+label, .label { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+label.inline, label.check { text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 400; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.hint { color: var(--muted); font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; margin: 0; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+input[type=text], input[type=number], textarea, select {
+  font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; width: 100%;
+}
+input[type=number] { width: 80px; }
+textarea { resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+button {
+  font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.ghost { padding: 5px 10px; font-size: 13px; }
+
+.tabs, .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.tabs button, .seg button { flex: 1; border: 0; border-radius: 0; background: transparent; }
+.tabs button + button, .seg button + button { border-left: 1px solid var(--line); }
+.tabs button[aria-selected=true], .seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); }
+.tabs { margin-bottom: 4px; }
+
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin: 6px 0; }
+details label { margin-top: 8px; }
+input[type=range] { flex: 1; }
+
+.actions button { width: 100%; }
+#status.error { color: #d0423a; }
+
+.viewer { position: relative; background: var(--viewer); min-height: 0; }
+#view { width: 100%; height: 100%; display: block; }
+.dims {
+  position: absolute; left: 16px; bottom: 14px;
+  font: 12px ui-monospace, Menlo, monospace; color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  padding: 4px 8px; border-radius: 5px;
+}
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 45vh; height: auto; }
+  .panel { border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; }
+  .viewer { order: -1; height: 45vh; }
+}
