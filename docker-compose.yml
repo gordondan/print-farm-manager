@@ -11,6 +11,9 @@ services:
     volumes:
       - farm-data:/app/server/data
       - farm-gcode:/app/server/gcode
+    networks:
+      - default
+      - cloudflare-tunnel
 
   # Development — hot reload for both server and client, no local Node.js
   # install required. Behind the `dev` profile so a bare `docker compose up`
@@ -53,3 +56,8 @@ volumes:
   farm-gcode:
   farm-data-dev:
   farm-gcode-dev:
+
+networks:
+  default:
+  cloudflare-tunnel:
+    external: true
