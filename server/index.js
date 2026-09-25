@@ -73,6 +73,7 @@ if (!fs.existsSync(path.join(clientDist, 'index.html'))) {
   console.error('');
   process.exit(1);
 }
+require('../garden')(app); // fork-only plots under /garden — see garden/README.md
 app.use(express.static(clientDist));
 // SPA catch-all — non-API routes serve index.html
 app.get(/^(?!\/api).*/, (_req, res) => {

@@ -35,6 +35,7 @@ WORKDIR /app
 COPY package.json ./
 COPY --from=server-deps /app/node_modules ./node_modules
 COPY server ./server
+COPY garden ./garden
 COPY --from=client-build /app/client/dist ./client/dist
 
 # Persistent state — mount volumes here in production (see docker-compose.yml)

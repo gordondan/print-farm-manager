@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/projects',       label: 'Projects' },
   { to: '/jobs',           label: 'Jobs' },
   { to: '/decommissioned', label: 'Decommissioned' },
+  { to: '/labels',         label: 'Labels' }, // garden plot, see garden/README.md
   { to: '/settings',       label: 'Settings' },
 ];
 
@@ -112,6 +113,7 @@ export default function App() {
             <Route path="/jobs"            element={<Jobs />} />
             <Route path="/decommissioned"  element={<Decommissioned />} />
             <Route path="/settings"        element={<Settings />} />
+            <Route path="/labels"          element={<iframe src="/garden/labels/?embed" title="Labels" style={{ border: 0, width: '100%', height: 'calc(100vh - 48px)', display: 'block' }} />} />
           </Routes>
         </main>
       </div>
