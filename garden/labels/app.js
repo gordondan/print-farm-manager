@@ -231,11 +231,33 @@ function setStatus(msg, error = false) {
 }
 
 // ─── Downloads ──────────────────────────────────────────────────────────────
+// The blob URL stays alive until the next save: Chrome can still be reading
+// it (download scan, save dialog) well after the click, and revoking it early
+// leaves an entry in the downloads bubble with no file behind it.
+let lastUrl;
 function save(bytes, filename, type) {
-  const url = URL.createObjectURL(new Blob([bytes], { type }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  const blob = new Blob([bytes], { type });
+  if (lastUrl) URL.revokeObjectURL(lastUrl);
+  lastUrl = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: lastUrl, download: filename });
+  document.body.append(a);
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  a.remove();
+  return { filename, size: blob.size };
+}
+
+// Status line after a save, with a link to fetch the same file again in case
+// the browser swallowed the automatic download.
+function savedStatus(msg, { filename, size }) {
+  setStatus(`${msg} ${filename} (${formatBytes(size)}) `);
+  const again = Object.assign(document.createElement('a'), {
+    href: lastUrl, download: filename, textContent: 'Download again',
+  });
+  $('status').append(again);
+}
+
+function formatBytes(n) {
+  return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 }
 
 function sizeTag() {
@@ -258,15 +280,16 @@ async function download(kind) {
     const tag = sizeTag();
     const single = items.length === 1;
 
+    let saved;
     if (kind === 'stl') {
       // One STL per label with every selected part in it.
       const files = Object.fromEntries(items.map(({ safe, kit }) =>
         [`${safe}-${tag}.stl`, writeBinaryStl(mergeTriangles(...Object.values(kit)), safe)]));
       if (single) {
         const [[name, bytes]] = Object.entries(files);
-        save(bytes, name, 'model/stl');
+        saved = save(bytes, name, 'model/stl');
       } else {
-        save(zipSync(files), `labels-${tag}.zip`, 'application/zip');
+        saved = save(zipSync(files), `labels-${tag}.zip`, 'application/zip');
       }
     } else if (kind === 'parts') {
       const files = {};
@@ -277,12 +300,12 @@ async function download(kind) {
           files[path] = writeBinaryStl(tris, `${safe} ${part}`);
         }
       }
-      save(zipSync(files), single ? `${items[0].safe}-${tag}-parts.zip` : `labels-${tag}-parts.zip`, 'application/zip');
+      saved = save(zipSync(files), single ? `${items[0].safe}-${tag}-parts.zip` : `labels-${tag}-parts.zip`, 'application/zip');
     } else {
       const laid = layoutBatch(items.map((it) => it.kit)).map((kit, i) => ({ ...kit, safe: items[i].safe }));
-      save(write3mf(laid), single ? `${items[0].safe}-${tag}.3mf` : `labels-${tag}.3mf`, 'model/3mf');
+      saved = save(write3mf(laid), single ? `${items[0].safe}-${tag}.3mf` : `labels-${tag}.3mf`, 'model/3mf');
     }
-    setStatus(`Saved ${items.length} label${single ? '' : 's'}.`);
+    savedStatus(`Saved ${items.length} label${single ? '' : 's'}:`, saved);
   } catch (e) {
     console.error(e);
     setStatus(e.message, true);
