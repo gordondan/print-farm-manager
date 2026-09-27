@@ -11,11 +11,16 @@ const express = require('express');
 module.exports = function mountGarden(app) {
   const garden = express.Router();
 
-  // Label generator: static, fully client-side (no API, no DB).
+  // Label generator page: static, client-side.
   garden.use('/labels', express.static(path.join(__dirname, 'labels'), {
     index: 'index.html',
     redirect: true, // /garden/labels → /garden/labels/ so relative URLs resolve
   }));
+
+  // Label job queue for "Send to Print Garden" (worker: labels/worker/).
+  // Its own files on the data volume, never farm.db.
+  garden.use('/api/labels', require('./labels/server.cjs')(
+    process.env.GARDEN_LABELS_DIR || path.join(__dirname, '..', 'server', 'data', 'garden', 'labels')));
 
   // Real 404s for missing garden files. Without this they fall through to
   // the SPA catch-all and come back as index.html with a 200 (the label app

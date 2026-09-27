@@ -6,7 +6,7 @@ wall so pulling upstream updates stays a clean rebase.
 
 | Plot | URL | What |
 |---|---|---|
-| `labels/` | `/labels` (in the app shell), `/garden/labels/` (standalone) | Multibin label generator → STL / 3MF |
+| `labels/` | `/labels` (in the app shell), `/garden/labels/` (standalone), `/garden/api/labels` (job queue) | Multibin label generator → STL / 3MF, or **Send to Print Garden** (slice + queue) |
 
 ## The wall
 
@@ -60,9 +60,19 @@ docker compose -p print-farm-manager up -d --build print-farm-manager
 
 Roll back to the pre-garden build: `docker tag print-farm-manager:pre-garden print-farm-manager:latest && docker compose -p print-farm-manager up -d --no-build print-farm-manager`.
 
+## Mac-side services
+
+Some garden work can't run in the Linux container. The label slicing worker
+(`labels/worker/`) runs on the farm host as a launchd agent, because slicing
+uses the Mac's OrcaSlicer and Batch Slicer presets through the
+add-to-printgarden helper. Install or reinstall it with
+`garden/labels/worker/install.sh`. It logs to
+`~/Library/Logs/garden-label-worker.log`.
+
 ## Tests
 
 ```bash
-node --test garden/labels/tests/*.test.mjs   # garden plots (node:test)
+node --test garden/labels/tests/*.test.mjs   # garden plots (node:test); the queue API
+                                              # test needs express, so run it in the deps image
 npm test                                      # upstream server suite (jest), untouched
 ```

@@ -6,9 +6,41 @@ history). Pick a size (1CU / 2CU / 3CU / custom), type text or paste a batch,
 and download STL, per-part STLs, or a colored 3MF for Bambu Studio.
 
 Served by Print Garden at `/labels` (inside the app shell) and
-`/garden/labels/` (standalone). Fully client-side: no build step, no API —
-three.js, opentype.js, fflate and the Arimo font are vendored in `vendor/` and
-`fonts/`.
+`/garden/labels/` (standalone). Geometry is generated in the browser with no
+build step: three.js, opentype.js, fflate and the Arimo font are vendored in
+`vendor/` and `fonts/`.
+
+## Send to Print Garden
+
+```
+browser ──plates──▶ /garden/api/labels (server.cjs, queue on disk)
+                          ▲  claim / progress
+                          │
+            Mac: worker/label_worker.py ──▶ add-to-printgarden helper
+                                              (BatchSlicer + OrcaSlicer)
+                                              ──▶ Print Garden API
+```
+
+- **Plates:** the batch is packed onto P1S-size plates (256 mm, the smallest
+  bed; see `lib/plates.js`), with each label kit whole on one plate. The page
+  uploads one single-color STL per plate.
+- **Worker:** claims the job and runs the helper once per plate. Plate 1
+  creates the project as a draft, and later plates join it by id with their
+  own `--parts-per-plate`.
+- **Activation:** the project is activated only if every plate loaded;
+  otherwise it stays a draft and the job shows why.
+- **Printers:** the helper's defaults apply (P1S = PLA, SV08 = PETG, any
+  color), and each part gets one plate per printer model.
+- **Storage:** the queue lives in `server/data/garden/labels/` on the data
+  volume and never touches `farm.db`. Finished jobs keep their `job.json`
+  (last 50) and drop their plate files.
+- **Worker offline:** jobs wait; the page warns when the worker hasn't
+  checked in for a minute. A job claimed by a worker that died is handed out
+  again after 30 minutes.
+
+Install the worker: `worker/install.sh` (a launchd agent in your login
+session). Run it by hand against another instance with
+`PRINTGARDEN_URL=http://localhost:3099 python3 worker/label_worker.py --once`.
 
 ## Outputs
 
@@ -39,4 +71,6 @@ node --test garden/labels/tests/*.test.mjs
 ```
 
 Covers watertight text for every glyph of both bundled fonts, fit/centering,
-layout, STL round-trip and 3MF structure.
+layout, plate packing, STL round-trip, 3MF structure, and the job queue API.
+The queue test needs express and multer, so run it inside the deps image;
+elsewhere it skips.

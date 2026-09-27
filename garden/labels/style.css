@@ -94,7 +94,15 @@ details label { margin-top: 8px; }
 input[type=range] { flex: 1; }
 
 .actions button { width: 100%; }
-#status.error { color: #d0423a; }
+#status.error, .jobs .failed .msg { color: #d0423a; }
+.warn { color: #b7791f; }
+.jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.jobs li { border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font-size: 13px; }
+.jobs .name { font-weight: 600; }
+.jobs .msg { color: var(--muted); font-size: 12px; }
+.jobs .done .msg { color: #2f9e5b; }
+.jobs a { color: var(--accent); }
+:root[data-theme=garden] .jobs a { color: #93c5fd; }
 
 .viewer { position: relative; background: var(--viewer); min-height: 0; }
 #view { width: 100%; height: 100%; display: block; }

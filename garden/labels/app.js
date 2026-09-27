@@ -8,6 +8,7 @@ import {
   buildKit, labelFootprint, layoutBatch, parseLabels, uniqueSafeNames,
 } from './lib/labelgen.js';
 import { write3mf, MATERIAL_COLORS } from './lib/threemf.js';
+import { packPlates } from './lib/plates.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -205,7 +206,7 @@ function refresh({ refit = false } = {}) {
       setStatus(e.message, true);
     }
     const ok = all.length > 0;
-    for (const id of ['dl-stl', 'dl-parts', 'dl-3mf']) $(id).disabled = !ok;
+    for (const id of ['dl-stl', 'dl-parts', 'dl-3mf', 'send-btn']) $(id).disabled = !ok;
     $('dl-stl').textContent = state.mode === 'batch' && all.length > 1 ? `Download ${all.length} STLs (.zip)` : 'Download STL';
   }, 60);
 }
@@ -288,6 +289,88 @@ async function download(kind) {
   }
 }
 
+// ─── Send to Print Garden ───────────────────────────────────────────────────
+// Only offered when this page is served by Print Garden (the queue API is a
+// sibling under /garden). The Mac-side worker does the slicing.
+const QUEUE = new URL('../api/labels/', location.href).href;
+const WORKER_STALE_MS = 60_000;
+const watching = new Set();
+
+async function initSend() {
+  let health;
+  try {
+    const r = await fetch(QUEUE + 'health');
+    if (!r.ok) return;
+    health = await r.json();
+  } catch { return; }
+  $('send').hidden = false;
+  $('project').value = `Labels ${new Date().toISOString().slice(0, 10)}`;
+  showWorker(health);
+  renderJobs();
+  setInterval(async () => {
+    try { showWorker(await (await fetch(QUEUE + 'health')).json()); } catch { /* next tick */ }
+  }, 30_000);
+}
+
+function showWorker({ worker_seen_at: seen }) {
+  $('worker-note').hidden = !!seen && Date.now() - Date.parse(seen) < WORKER_STALE_MS;
+}
+
+async function sendToGarden() {
+  const project = $('project').value.trim();
+  if (!project) { setStatus('Give the project a name first.', true); return; }
+  $('send-btn').disabled = true;
+  try {
+    setStatus('Packing plates…');
+    const items = await buildAll();
+    const plates = packPlates(items.map((it) => it.kit));
+    const form = new FormData();
+    form.append('meta', JSON.stringify({
+      project,
+      size: sizeTag(),
+      plates: plates.map((p) => ({ count: p.kitIndexes.length, labels: p.kitIndexes.map((i) => items[i].text) })),
+    }));
+    plates.forEach((p, i) => form.append('plates',
+      new Blob([writeBinaryStl(p.tris, `plate ${i + 1}`)], { type: 'model/stl' }), `plate-${i + 1}.stl`));
+    const r = await fetch(QUEUE + 'jobs', { method: 'POST', body: form });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    setStatus(`Queued ${items.length} label${items.length === 1 ? '' : 's'} on ${plates.length} plate${plates.length === 1 ? '' : 's'}.`);
+    renderJobs();
+  } catch (e) {
+    setStatus(`Send failed: ${e.message}`, true);
+  } finally {
+    $('send-btn').disabled = false;
+  }
+}
+
+async function renderJobs() {
+  let jobs;
+  try { jobs = await (await fetch(QUEUE + 'jobs')).json(); } catch { return; }
+  const list = jobs.slice(0, 5);
+  $('jobs').replaceChildren(...list.map((j) => {
+    const li = document.createElement('li');
+    li.className = j.status;
+    const name = Object.assign(document.createElement('div'), { className: 'name' });
+    name.textContent = j.project;
+    const msg = Object.assign(document.createElement('div'), { className: 'msg' });
+    const plates = `${j.progress.done}/${j.progress.total} plates`;
+    msg.textContent = j.status === 'done' || j.status === 'failed' ? j.message : `${j.status} · ${plates} · ${j.message}`;
+    li.append(name, msg);
+    if (j.project_id) {
+      const a = Object.assign(document.createElement('a'), { href: '/projects', target: '_top', textContent: `Open projects (#${j.project_id})` });
+      li.append(a);
+    }
+    return li;
+  }));
+  // Keep polling while anything is still in flight.
+  const busy = list.some((j) => j.status === 'queued' || j.status === 'slicing');
+  if (busy && !watching.size) {
+    watching.add(1);
+    setTimeout(() => { watching.clear(); renderJobs(); }, 3000);
+  }
+}
+
 // ─── Wiring ─────────────────────────────────────────────────────────────────
 for (const tab of document.querySelectorAll('[role=tab]')) {
   tab.addEventListener('click', () => {
@@ -346,7 +429,9 @@ $('font-file').addEventListener('change', async () => {
 $('dl-stl').addEventListener('click', () => download('stl'));
 $('dl-parts').addEventListener('click', () => download('parts'));
 $('dl-3mf').addEventListener('click', () => download('3mf'));
+$('send-btn').addEventListener('click', sendToGarden);
 
 // ─── Boot ───────────────────────────────────────────────────────────────────
 state.font = await fontFor(state.fontUrl);
 onSizeChange();
+initSend();

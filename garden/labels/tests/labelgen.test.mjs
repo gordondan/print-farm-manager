@@ -174,3 +174,40 @@ test('label list parsing and safe names match labelgen.py', () => {
   assert.equal(makeSafeName('°°'), 'label');
   assert.deepEqual(uniqueSafeNames(['a', 'a', 'a']), ['a', 'a_2', 'a_3']);
 });
+
+// ─── Plate packing (Send to Print Garden) ───────────────────────────────────
+import { packPlates, PLATE } from '../lib/plates.js';
+
+
+test('plates: every kit placed once, in order, inside the bed margin', () => {
+  const texts = Array.from({ length: 50 }, (_, i) => `Bin ${i + 1}`);
+  const kits = texts.map((t) => buildKit({ text: t, font, size: '2CU' }));
+  const plates = packPlates(kits);
+  assert.deepEqual(plates.flatMap((p) => p.kitIndexes), texts.map((_, i) => i));
+  assert.ok(plates.length >= 2, 'expected more than one plate for 50 2CU labels');
+  for (const b of plates.map((p) => bounds(p.tris))) {
+    assert.ok(b.min[0] >= PLATE.margin - 1e-4 && b.min[1] >= PLATE.margin - 1e-4);
+    assert.ok(b.max[0] <= PLATE.width - PLATE.margin + 1e-4 && b.max[1] <= PLATE.depth - PLATE.margin + 1e-4);
+    assert.ok(Math.abs(b.min[2]) < 1e-5);
+  }
+});
+
+test('plates: kits on a plate do not overlap', () => {
+  const kits = ['A', 'B', 'C', 'D', 'E'].map((t) => buildKit({ text: t, font, size: '2CU', holder: holder2, rail }));
+  const [plate] = packPlates(kits);
+  // Re-derive each kit's placed box from the plate by splitting on kit order.
+  const sizes = kits.map((k) => mergeTriangles(...Object.values(k)).length);
+  const boxes = [];
+  let off = 0;
+  for (const n of sizes) { boxes.push(bounds(plate.tris.subarray(off, off + n))); off += n; }
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], c = boxes[j];
+    const overlap = a.min[0] < c.max[0] && c.min[0] < a.max[0] && a.min[1] < c.max[1] && c.min[1] < a.max[1];
+    assert.ok(!overlap, `kits ${i} and ${j} overlap`);
+  }
+});
+
+test('plates: oversized label is rejected with a clear message', () => {
+  const kit = buildKit({ text: 'Huge', font, size: CUSTOM_SIZE, custom: { length: 300, width: 20 } });
+  assert.throws(() => packPlates([kit]), /larger than a 256 mm plate/);
+});

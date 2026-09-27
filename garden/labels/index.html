@@ -81,6 +81,16 @@ Threaded Inserts</textarea>
         <button id="dl-3mf">Colored 3MF (Bambu)</button>
         <p id="status" class="hint" role="status"></p>
       </section>
+
+      <section id="send" hidden>
+        <span class="label">Send to Print Garden</span>
+        <label for="project" class="hint">Project name</label>
+        <input id="project" type="text" autocomplete="off">
+        <button id="send-btn" class="primary">Slice &amp; queue</button>
+        <p class="hint">Single color, raised text. Labels are packed onto P1S-size plates, sliced on the farm host for every printer, and the project is activated once every plate loads.</p>
+        <p id="worker-note" class="hint warn" hidden>The slicing worker hasn't checked in recently. Jobs will wait until it's running.</p>
+        <ul id="jobs" class="jobs"></ul>
+      </section>
     </aside>
 
     <section class="viewer">
