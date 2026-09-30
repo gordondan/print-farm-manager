@@ -2,6 +2,99 @@
 
 ---
 
+## 2026-09-25: mark-job-failure deducted the full plate after a count correction
+
+Found while building the part audit trail and reproduced in a test: on a part at 10 whose last plate held 4, Complete and Decommission with 3 of 4 good correctly took the count to 9, but marking that same job failed then deducted the full plate (to 5) instead of the 3 it actually contributed (to 6), leaving the part one short. mark-job-failure assumed a finished job always contributes exactly `parts_per_plate`.
+
+Fixed with the new `partLedger.jobNetCredit()`, which sums a job's `part_qty_ledger` rows: exactly what it contributes to the count right now. mark-job-failure deducts that, and nothing when it is 0. For an uncorrected job the net is the full plate, so normal behavior is unchanged: against Joel's 2026-09-24 farm backup, all 9,203 finished jobs have a net credit equal to their `parts_per_plate` after the rebuild. A job with no ledger rows falls back to `parts_per_plate`. The deduction is still backed by one operator action on one job, and the endpoint only matches `finished` jobs and flips them to `failed`, so it cannot fire twice for the same job. It can only ever deduct less than before, never credit.
+
+Deliberately not changed: Set Ready and Complete and Decommission still apply `confirmed_qty` against `parts_per_plate`. Switching them to the net credit was tried and backed out. The Fleet page pre-fills `confirmed_qty` with the full plate, so on a printer re-held against the same finished job, a net-based difference would turn a routine confirm into a phantom +1 re-credit of the earlier correction. The remaining, pre-existing edge (typing the same correction twice on a re-held printer applies it twice) needs the Fleet pre-fill to show the job's current net credit first, and is left for Joel to decide on. A new test pins the safe behavior: confirming the pre-filled full plate after a correction adds nothing.
+
+### Changes
+- `server/partLedger.js`: `jobNetCredit()`.
+- `server/routes/printers.js`: mark-job-failure deducts the job's net credit; comment on complete-and-decommission explaining why it stays against `parts_per_plate`.
+- `server/tests/printers-decommission.test.js`: regression test for mark-failed after a correction (fails before the fix: 5 instead of 6), a plate confirmed as 0, the no-ledger fallback, and the pre-fill safety pin.
+- `server/tests/part-ledger.test.js`: `jobNetCredit` unit tests.
+- `docs/api.md`: mark-job-failure deducts the net credit; complete-and-decommission's normal case now documents its existing `confirmed_qty` correction. `docs/database.md`: job net credit.
+
+---
+
+## 2026-09-25: audit trail fixes from the first real-data run
+
+First real run of `server/scripts/audit-dry-run.js`, against Joel's 2026-09-24 23:00 hourly farm backup (158 parts, 9,203 finished jobs): zero mismatches, no completed counts changed, 9,203 rebuilt job rows and 35 baseline rows. With `--db <file>`, the script rebuilds that file in place, but its closing line still said the snapshot "can be deleted" and implied nothing had been written. It now says the file passed was modified and the live DB was not.
+
+Previewing the audit page on that backup also surfaced two things the demo data hid, both fixed before the ledger reaches the farm:
+
+- Baseline rows were dated at the moment of the rebuild, which pinned months-old corrections to upgrade day. Part 94 ("v2.3 Battery Clip", July 300 Polymaker) has 20 finished 25-part plates (500) against a count of 300, last touched on 2026-06-29; its -200 baseline showed as a drop on 2026-09-25. Baseline rows are now dated at the part's `updated_at`, clamped to no earlier than its last rebuilt job and no later than the rebuild.
+- For a closed part, the chart's time axis still ran to today, squeezing a May to June print run into the left sixth of the chart. Closed parts now end the axis at their last event; open parts still run to now.
+
+### Changes
+- `server/scripts/audit-dry-run.js`: closing message distinguishes `--db` (file modified in place) from the default snapshot mode.
+- `server/partLedger.js`: `rebuildMissingLedgers()` dates baseline rows at the part's `updated_at`, clamped between its last rebuilt job and `now`.
+- `server/tests/part-ledger.test.js`: covers both clamps.
+- `client/src/pages/PartAudit.jsx`: chart time axis ends at the last event for closed parts.
+- `docs/database.md`, `docs/web-app.md`: documented both.
+
+---
+
+## 2026-09-24: part audit page
+
+Phase 3 of 3 of the part audit trail. Clicking a part's progress bar (or the new "Audit ›" label beside its percentage) on the Projects page opens `/parts/:id/audit`. The page shows how the part's printed total was built up: a step chart of the running total against the target, a per-printer breakdown of what each machine contributed and lost, and a filterable timeline of every credit, correction, deduction, and failure with its printer, job number, and G-code file. Failures that never credited (a plate that failed or was stopped before any count was added) are included as dimmed zero-change rows and gray chart markers, so the page shows every failure and not only the ones that took parts away. The Back link returns to the Projects page with the part's project already open.
+
+Read-only, no new dependencies: the chart is hand-drawn SVG, and the layout switches to stacked cards below 600 px. Checked with `npm run build` and screenshots against the demo seed at 1280 px and 390 px (no horizontal page scroll on the phone width), including the hover tooltip and the Back link round trip.
+
+### Changes
+- `client/src/pages/PartAudit.jsx` (new): the audit page.
+- `client/src/App.jsx`: `/parts/:id/audit` route.
+- `client/src/pages/Projects.jsx`: each part's count label and progress bar link to its audit page, with an "Audit ›" affordance; the page opens the project passed as `openProjectId` in router state, so the audit page's Back link returns to it.
+- `docs/web-app.md`: Part Audit Page section, the Projects audit link, key-files table.
+
+---
+
+## 2026-09-24: part audit API
+
+Phase 2 of 3 of the part audit trail: `GET /api/parts/:id/audit` returns everything the audit page needs in one read. That covers the part and project, every ledger entry joined to its job, printer, and G-code, and a per-printer summary (plates credited, parts added and removed, net contribution, failed plates). It also returns a reconciliation flag that turns false if the ledger ever stops adding up to `completed_qty`. It also lists uncredited failures: jobs that started printing and ended failed or cancelled without changing the count, so the page can show the full failure picture and not only the deductions. Read-only; no part-count path touched.
+
+Checked against the demo seed through a running server in `DEMO_MODE`: the Standard Benchy part returned 6 entries, 1 uncredited failure, and a matching reconciliation (47 of 47).
+
+### Changes
+- `server/partLedger.js`: `getPartAudit()` builds the response.
+- `server/routes/parts.js`: `GET /:id/audit`, declared before the other `/:id` routes.
+- `server/tests/part-audit.test.js` (new): 404, entry joins and ordering, uncredited-failure inclusion and exclusion rules, per-printer summary, deleted and renamed printers, deleted G-code, reconciliation.
+- `docs/api.md`: `GET /api/parts/:id/audit` entry; `PUT /api/parts/:id` notes the `manual_edit` ledger row.
+
+---
+
+## 2026-09-24: part quantity ledger (audit trail foundation)
+
+Joel asked for a per-part audit page showing how a part's printed total was built up: which printers and which print jobs added to it, and which failures took away from it. Until now `parts.completed_qty` was a single running number with no record of why it changed, spread across eight separate code paths (the scheduler's automatic FINISHED credit, four set-ready branches, two complete-and-decommission branches, mark-job-failure, and manual edits on the Projects page).
+
+This is phase 1 of 3: the data layer only. Nothing changes for operators yet. Every change to `completed_qty` now goes through one helper, `adjustPartQty()` in the new `server/partLedger.js`, which runs the same UPDATE the old inline SQL did and appends a row to the new append-only `part_qty_ledger` table in the same transaction. Each row records the job, printer (with a name snapshot that survives renames and deletes), G-code, the change actually applied, the running total after it, a source (`print_finished`, `operator_confirm`, `operator_adjust`, `marked_failed`, `manual_edit`), and a readable note such as "Operator confirmed 24 of 25 good (Set Ready)".
+
+Part-count behavior is mechanically preserved: same amounts, same conditions, same zero clamps, same part/project close and reopen logic. The ledger never credits anything on its own; it only records changes made by the existing events, so it cannot introduce a phantom credit and inherits their restart, reconnect, and poll-flap protection. New tests assert that a repeated FINISHED poll, a restart with a printer still latched on FINISHED, and a stale failed job from a previous session each write no ledger row. A new guard test scans the server source and fails if any file other than `partLedger.js` writes `completed_qty` directly; run against the previous code it flags all eight original call sites. The set-ready branches live inside `server/index.js` and are covered by that guard plus the helper tests, not by an end-to-end route test.
+
+Existing installs get a one-time history rebuild on the first start after upgrading: each finished job (including legacy `done` jobs) becomes a `rebuilt_job` row at its finish time, and when those do not add up to the current count (the old schema never stored operator count corrections or manual edits) one clearly labelled `baseline` row covers the difference. The rebuild never changes `completed_qty`. `node server/scripts/audit-dry-run.js` runs it against a snapshot of the live DB taken with SQLite's online backup API, so it can be checked on real farm data before deploying; `--check` is a read-only reconciliation of the live ledger afterwards.
+
+Verified against the demo seed and a real server start in `DEMO_MODE`: 16 job rows and 5 baseline rows rebuilt, zero mismatches, a second start rebuilds nothing. On 2026-09-30 Joel switched the production farm machine to this branch and verified the audit trail there (dry run against a live snapshot, the one-time rebuild on restart, the audit pages, and the `--check` reconciliation) before it was merged.
+
+Found while building this, not fixed here: mark-job-failure deducts the job's full `parts_per_plate` even when the operator already corrected that plate's count. Reproduced on a part at 10 whose last plate held 4: complete-and-decommission with 3 of 4 good takes it to 9, then mark-job-failure on the same job deducts 4 (to 5) instead of the 3 that were actually credited (to 6), leaving the count one part too low. The new ledger shows it directly as `operator_adjust -1` followed by `marked_failed -4`. Left for a separate change because it alters part-count behavior.
+
+### Changes
+- `server/partLedger.js` (new): `part_qty_ledger` schema, `adjustPartQty()`, `deleteForPart()`, and `rebuildMissingLedgers()`.
+- `server/db.js`: creates the ledger table and runs the rebuild for parts with no ledger rows on startup.
+- `server/scheduler.js`: `_handleFinished` credits through `adjustPartQty` (`print_finished`, with a note when recovering a job marked failed after a connection drop this session).
+- `server/index.js`: all three crediting branches of set-ready go through `adjustPartQty` (`operator_adjust` for a corrected count, `operator_confirm` for missed finish, connection-drop recovery, stopped on printer, and stalled upload).
+- `server/routes/printers.js`: complete-and-decommission and mark-job-failure go through `adjustPartQty`.
+- `server/routes/parts.js`: `PUT /api/parts/:id` records a `manual_edit` row only when `completed_qty` actually changes; part delete removes the part's ledger rows.
+- `server/routes/projects.js`: draft project delete removes each part's ledger rows.
+- `server/routes/backup.js`: export includes `part_qty_ledger`; restore clears it, restores backed-up rows, rebuilds parts from older backups, syncs its autoincrement, and reports the row count.
+- `server/seed-demo.js`: clears the ledger so the next start rebuilds it from the seeded jobs.
+- `server/scripts/audit-dry-run.js` (new): snapshot dry run, `--check` reconciliation, `--part` timeline.
+- `server/tests/part-ledger.test.js` (new), `server/tests/part-ledger-guard.test.js` (new); ledger cases added to `scheduler-finished.test.js`, `printers-decommission.test.js`, and `backup-restore.test.js`.
+- `docs/database.md`: `part_qty_ledger` table, sources, invariant, rebuild, and dry-run script. `docs/api.md`: backup export/restore include the ledger. `docs/README.md`: project map.
+
+---
+
 ## 2026-09-01: printerIdle bypass let dispatch exceed dispatch_batch_size
 
 Joel batch-confirmed a stack of held printers via Set Ready (N) with `dispatch_batch_size` set to 5, then individually confirmed roughly ten more printers that had shown a false failed-upload hold (the upload attempt was reported failed on our side, but the printer had actually completed the print). Fleet's uploading count briefly showed 7 concurrent uploads against the configured limit of 5.

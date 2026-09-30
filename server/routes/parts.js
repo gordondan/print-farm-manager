@@ -1,6 +1,7 @@
 const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
+const partLedger = require('../partLedger');
 const router  = express.Router();
 
 const GCODE_DIR = path.join(__dirname, '..', 'gcode');
@@ -32,6 +33,13 @@ module.exports = (db, scheduler = null) => {
   // Diagnostic: why is (or isn't) this part dispatching?
   // Mirrors the scheduler's eligibility rules (sweepIdlePrinters + candidate query)
   // so operators can self-diagnose "why isn't my part printing" from the UI.
+  // GET /api/parts/:id/audit: the part's quantity audit trail (see server/partLedger.js).
+  router.get('/:id/audit', (req, res) => {
+    const audit = partLedger.getPartAudit(db, req.params.id);
+    if (!audit) return res.status(404).json({ error: 'Part not found' });
+    res.json(audit);
+  });
+
   router.get('/:id/dispatch-status', (req, res) => {
     const part = db.prepare(`
       SELECT parts.*, ${ACTIVE_QTY_SQL},
@@ -190,22 +198,35 @@ module.exports = (db, scheduler = null) => {
     }
 
     const now = Date.now();
-    db.prepare(`
-      UPDATE parts
-      SET name          = COALESCE(?, name),
-          target_qty    = COALESCE(?, target_qty),
-          completed_qty = COALESCE(?, completed_qty),
-          status        = ?,
-          updated_at    = ?
-      WHERE id = ?
-    `).run(
-      name,
-      target_qty !== undefined ? parseInt(target_qty, 10) : null,
-      completed_qty !== undefined ? parseInt(completed_qty, 10) : null,
-      resolvedStatus,
-      now,
-      req.params.id
-    );
+    const newCompleted = completed_qty !== undefined ? parseInt(completed_qty, 10) : null;
+    db.transaction(() => {
+      // completed_qty changes go through the part ledger so the audit trail records
+      // the manual edit. Only an actual change is recorded: the Projects page sends
+      // completed_qty with every qty save, even when only the target changed.
+      if (newCompleted != null && !isNaN(newCompleted) && newCompleted !== part.completed_qty) {
+        partLedger.adjustPartQty(db, {
+          partId: part.id,
+          setTo: newCompleted,
+          source: partLedger.SOURCES.MANUAL_EDIT,
+          note: `Completed count edited from ${part.completed_qty} to ${newCompleted}`,
+          now,
+        });
+      }
+      db.prepare(`
+        UPDATE parts
+        SET name          = COALESCE(?, name),
+            target_qty    = COALESCE(?, target_qty),
+            status        = ?,
+            updated_at    = ?
+        WHERE id = ?
+      `).run(
+        name,
+        target_qty !== undefined ? parseInt(target_qty, 10) : null,
+        resolvedStatus,
+        now,
+        req.params.id
+      );
+    })();
 
     // If this update reopened a closed part, also reopen the project if it was
     // completed. This happens when the operator raises target_qty via the UI
@@ -250,6 +271,7 @@ module.exports = (db, scheduler = null) => {
         db.prepare('DELETE FROM gcodes WHERE id = ?').run(gcode.id);
       }
 
+      partLedger.deleteForPart(db, req.params.id);
       db.prepare('DELETE FROM parts WHERE id = ?').run(req.params.id);
     })();
 
