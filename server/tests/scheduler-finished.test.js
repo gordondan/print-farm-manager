@@ -47,6 +47,7 @@ function makeDb() {
       project_id INTEGER NOT NULL, name TEXT NOT NULL,
       target_qty INTEGER NOT NULL, completed_qty INTEGER DEFAULT 0,
       status TEXT DEFAULT 'open', sort_order INTEGER DEFAULT 0,
+      print_time_seconds INTEGER,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE TABLE gcodes (
@@ -70,8 +71,9 @@ function makeDb() {
 
 function makeScheduler(db) {
   const scheduler = new JobScheduler(db, { on: () => {} });
-  // Prevent _dispatchToPrinter from running (it requires a full DB candidate)
-  scheduler._dispatchToPrinter = jest.fn().mockResolvedValue(null);
+  // Prevent the no-job fallback's dispatch attempt from running for real (it
+  // requires a full DB candidate schema this test file's minimal tables don't have).
+  scheduler.scheduleForPrinter = jest.fn();
   return scheduler;
 }
 
@@ -440,5 +442,121 @@ describe('_handleFinished — no job found', () => {
 
     const part = db.prepare('SELECT completed_qty FROM parts WHERE id = ?').get(partId);
     expect(part.completed_qty).toBe(5); // unchanged
+  });
+
+  // Regression test for the printerIdle/no-job-found bypass reported on the real
+  // farm: this fallback used to call _dispatchToPrinter directly, skipping the
+  // _isSweeping gate entirely, so a printer finishing with no tracked job could
+  // dispatch concurrently with an in-progress batch sweep and push peak
+  // concurrency past dispatch_batch_size. It must now route through
+  // scheduleForPrinter like every other dispatch trigger.
+  test('defers to the tail of an in-progress sweep instead of dispatching concurrently', () => {
+    const db        = makeDb();
+    // Construct directly (not via makeScheduler) so the real scheduleForPrinter
+    // runs: its _isSweeping early-return does no DB/dispatch work, so this stays
+    // safe against the minimal schema while proving the routing is correct.
+    const scheduler = new JobScheduler(db, { on: () => {} });
+    const printerId = seedPrinter(db);
+    scheduler._isSweeping = true;
+
+    scheduler._handleFinished(makePrinter(db, printerId));
+
+    expect(scheduler._pendingPrinters).toHaveLength(1);
+    expect(scheduler._pendingPrinters[0].id).toBe(printerId);
+  });
+});
+
+// ── Part ledger (audit trail) ─────────────────────────────────────────────────
+//
+// _handleFinished is the only automatic credit path. Each real FINISHED event must
+// leave exactly one ledger row, and nothing that CLAUDE.md's "phantom part credit" and
+// "stale-status replay" rules guard against (a repeated FINISHED poll, a restart with a
+// printer still reporting FINISHED, a stale failed job) may write one.
+
+describe('_handleFinished: part ledger', () => {
+  function ledgerRows(db, partId) {
+    require('../partLedger').ensureSchema(db);
+    return db.prepare('SELECT * FROM part_qty_ledger WHERE part_id = ? ORDER BY id').all(partId);
+  }
+
+  test('records one print_finished row with job, printer, gcode, and running total', () => {
+    const db        = makeDb();
+    const scheduler = makeScheduler(db);
+    const partId    = seedPart(db, seedProject(db), { completedQty: 2 });
+    const gcodeId   = seedGcode(db, partId);
+    const printerId = seedPrinter(db, { name: 'Bambu_12' });
+    const jobId     = seedJob(db, printerId, partId, gcodeId, 'printing', { partsPerPlate: 4 });
+
+    scheduler._handleFinished(makePrinter(db, printerId));
+
+    const rows = ledgerRows(db, partId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      job_id: jobId, printer_id: printerId, printer_name: 'Bambu_12', gcode_id: gcodeId,
+      delta: 4, balance_after: 6, source: 'print_finished', note: null,
+    });
+  });
+
+  test('a repeated FINISHED poll for the same print writes no second row', () => {
+    const db        = makeDb();
+    const scheduler = makeScheduler(db);
+    const partId    = seedPart(db, seedProject(db));
+    const gcodeId   = seedGcode(db, partId);
+    const printerId = seedPrinter(db);
+    seedJob(db, printerId, partId, gcodeId, 'printing');
+
+    scheduler._handleFinished(makePrinter(db, printerId));
+    scheduler._handleFinished(makePrinter(db, printerId));
+
+    expect(ledgerRows(db, partId)).toHaveLength(1);
+    expect(db.prepare('SELECT completed_qty FROM parts WHERE id = ?').get(partId).completed_qty).toBe(4);
+  });
+
+  test('a restart with the printer still reporting FINISHED writes no second row', () => {
+    const db        = makeDb();
+    const partId    = seedPart(db, seedProject(db));
+    const gcodeId   = seedGcode(db, partId);
+    const printerId = seedPrinter(db);
+    seedJob(db, printerId, partId, gcodeId, 'printing');
+
+    makeScheduler(db)._handleFinished(makePrinter(db, printerId));
+
+    // New process: fresh scheduler, same DB, printer latched on FINISHED.
+    const restarted = makeScheduler(db);
+    restarted.startedAt = Date.now() + 1;
+    restarted._handleFinished(makePrinter(db, printerId));
+
+    expect(ledgerRows(db, partId)).toHaveLength(1);
+  });
+
+  test('MQTT recovery of a failed job this session is recorded with an explanatory note', () => {
+    const db        = makeDb();
+    const scheduler = makeScheduler(db);
+    scheduler.startedAt = Date.now() - 1000;
+    const partId    = seedPart(db, seedProject(db));
+    const gcodeId   = seedGcode(db, partId);
+    const printerId = seedPrinter(db);
+    seedJob(db, printerId, partId, gcodeId, 'failed', { finishedAt: Date.now() });
+
+    scheduler._handleFinished(makePrinter(db, printerId));
+
+    const rows = ledgerRows(db, partId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe('print_finished');
+    expect(rows[0].note).toMatch(/connection drop/);
+  });
+
+  test('a stale failed job from a previous session writes no row', () => {
+    const db        = makeDb();
+    const scheduler = makeScheduler(db);
+    scheduler.startedAt = Date.now();
+    const partId    = seedPart(db, seedProject(db));
+    const gcodeId   = seedGcode(db, partId);
+    const printerId = seedPrinter(db);
+    seedJob(db, printerId, partId, gcodeId, 'failed', { finishedAt: scheduler.startedAt - 60_000 });
+
+    scheduler._handleFinished(makePrinter(db, printerId));
+
+    expect(ledgerRows(db, partId)).toHaveLength(0);
   });
 });

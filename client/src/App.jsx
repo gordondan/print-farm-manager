@@ -5,16 +5,22 @@ import Fleet from './pages/Fleet';
 import Printers from './pages/Printers';
 import PrinterDetail from './pages/PrinterDetail';
 import Projects from './pages/Projects';
+import PartAudit from './pages/PartAudit';
 import Jobs from './pages/Jobs';
+import Schedule from './pages/Schedule';
+import PrintQueue from './pages/PrintQueue';
 import Settings from './pages/Settings';
 import Decommissioned from './pages/Decommissioned';
 
 const NAV_ITEMS = [
   { to: '/',               label: 'Dashboard' },
-  { to: '/fleet',          label: 'Fleet' },
+  { to: '/fleet',          label: 'Fleet',         end: true },
+  // Sub-page of Fleet: indented under it in the sidebar.
+  { to: '/fleet/queue',    label: 'Print Queue',   child: true },
   { to: '/printers',       label: 'Printers',      end: true },
   { to: '/projects',       label: 'Projects' },
   { to: '/jobs',           label: 'Jobs' },
+  { to: '/schedule',       label: 'Schedule' },
   { to: '/decommissioned', label: 'Decommissioned' },
   { to: '/labels',         label: 'Labels' }, // garden plot, see garden/README.md
   { to: '/settings',       label: 'Settings' },
@@ -73,7 +79,15 @@ export default function App() {
             <div style={{ fontWeight: 400, fontSize: 11, color: '#475569' }}>Print Farm Manager</div>
           </div>
           {NAV_ITEMS.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.to === '/' || !!item.end} style={navLinkStyle}>
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/' || !!item.end}
+              style={(state) => ({
+                ...navLinkStyle(state),
+                ...(item.child && { marginLeft: 12, padding: '6px 12px', fontSize: 13 }),
+              })}
+            >
               {item.label}
             </NavLink>
           ))}
@@ -107,10 +121,13 @@ export default function App() {
           <Routes>
             <Route path="/"                element={<Dashboard />} />
             <Route path="/fleet"           element={<Fleet />} />
+            <Route path="/fleet/queue"     element={<PrintQueue />} />
             <Route path="/printers"        element={<Printers />} />
             <Route path="/printers/:id"    element={<PrinterDetail />} />
             <Route path="/projects"        element={<Projects />} />
+            <Route path="/parts/:id/audit" element={<PartAudit />} />
             <Route path="/jobs"            element={<Jobs />} />
+            <Route path="/schedule"        element={<Schedule />} />
             <Route path="/decommissioned"  element={<Decommissioned />} />
             <Route path="/settings"        element={<Settings />} />
             <Route path="/labels"          element={<iframe src="/garden/labels/?embed" title="Labels" style={{ border: 0, width: '100%', height: 'calc(100vh - 48px)', display: 'block' }} />} />

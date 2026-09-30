@@ -4,6 +4,8 @@ const Papa = require('papaparse');
 const axios = require('axios');
 const router = express.Router();
 const events = require('../events');
+const partLedger = require('../partLedger');
+const confirmCount = require('../confirmCount');
 const { dropConnection } = require('../drivers');
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -32,7 +34,17 @@ function resolveModel(rawModel, name) {
   return normalizeModel(rawModel) || inferModel(name);
 }
 
-module.exports = (db) => {
+// Loaded filament is compared by exact string equality against project and G-code
+// requirements (server/candidate-query.js), so a stray space typed into the printer's
+// Material field would silently stop it matching "PETG". Trim on the way in; empty
+// clears the value.
+function cleanFilament(v) {
+  return (typeof v === 'string' ? v.trim() : v) || null;
+}
+
+// scheduler is optional, only needed at runtime for sweepIdlePrinters after an edit
+// changes what a printer can print. Tests pass null so there is no live scheduler dependency.
+module.exports = (db, scheduler = null) => {
   // Silently keeps the printer_groups registry a superset of every group name
   // ever assigned to a printer, so a group can never again vanish from a
   // picker just because no printer currently carries it. Zero added friction:
@@ -71,6 +83,17 @@ module.exports = (db) => {
       WHERE p.is_active = 1
       ORDER BY p.name
     `).all();
+
+    // For held printers: the finished job an "N good" confirmation would correct, what it
+    // currently contributes to its part, and its plate size. The Fleet page pre-fills the
+    // count with confirm_credited and sends confirm_job_id back, so the operator always
+    // confirms against the same job the server corrects (see server/confirmCount.js).
+    for (const p of printers) {
+      const target = p.is_held === 1 ? confirmCount.finishedConfirmTarget(db, p.id) : null;
+      p.confirm_job_id          = target ? target.id : null;
+      p.confirm_parts_per_plate = target ? target.parts_per_plate : null;
+      p.confirm_credited        = target ? partLedger.jobNetCredit(db, target) : null;
+    }
     res.json(printers);
   });
 
@@ -134,7 +157,7 @@ module.exports = (db) => {
         INSERT INTO printers (name, ip, api_key, serial_number, group_name, type, model, loaded_material, loaded_color, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(name, ip, api_key || '', serial_number || '', group_name || null, printerType, normalized,
-             loaded_material || null, loaded_color || null, Date.now());
+             cleanFilament(loaded_material), cleanFilament(loaded_color), Date.now());
       // Best-effort convenience: a failure here must never turn an already-
       // committed printer creation into a reported error.
       if (group_name && group_name.trim()) {
@@ -164,8 +187,8 @@ module.exports = (db) => {
     }
 
     // loaded_material / loaded_color: if key is present in body, use the value (even if empty → null to clear)
-    const newMaterial = 'loaded_material' in req.body ? (loaded_material || null) : printer.loaded_material;
-    const newColor    = 'loaded_color'    in req.body ? (loaded_color    || null) : printer.loaded_color;
+    const newMaterial = 'loaded_material' in req.body ? cleanFilament(loaded_material) : printer.loaded_material;
+    const newColor    = 'loaded_color'    in req.body ? cleanFilament(loaded_color)    : printer.loaded_color;
 
     // Compute effective new values for all tracked fields (COALESCE: body wins, else keep existing)
     const after = {
@@ -236,6 +259,18 @@ module.exports = (db) => {
         console.log(`[printers] ${after.name} connection settings changed, dropped cached driver connection`);
       }
 
+      // An idle printer only asks for work when it transitions into IDLE, so loading
+      // PETG on a printer that is already idle used to leave it sitting there next to a
+      // PETG part until something else happened to trigger a sweep. Sweep now whenever
+      // the edit changes what this printer is eligible for. Safe to call unconditionally
+      // on those edits: the sweep already filters to idle, unheld, active printers.
+      const targetingChanged =
+        after.model           !== printer.model ||
+        after.group_name      !== printer.group_name ||
+        after.loaded_material !== printer.loaded_material ||
+        after.loaded_color    !== printer.loaded_color;
+      if (targetingChanged && scheduler) scheduler.sweepIdlePrinters();
+
       res.json(db.prepare('SELECT * FROM printers WHERE id = ?').get(req.params.id));
     } catch (err) {
       if (err.message.includes('UNIQUE')) {
@@ -288,6 +323,13 @@ module.exports = (db) => {
       ? parseInt(confirmed_qty, 10)
       : null;
 
+    // The Fleet page sends the job_id it pre-filled the count for (see server/confirmCount.js).
+    // If that is no longer the job a confirmation corrects, refuse before changing anything.
+    const jobId = confirmCount.parseJobId(req.body);
+    if (confirmCount.jobIdMismatch(db, printer.id, jobId)) {
+      return res.status(409).json({ error: confirmCount.JOB_CHANGED_ERROR });
+    }
+
     // Reconcile a part's status with its completed_qty: close (and maybe complete the project) when
     // the target is met, reopen (and reactivate the project) when a reduced count drops below it.
     const settlePart = (partId) => {
@@ -323,23 +365,36 @@ module.exports = (db) => {
     if (printingJob) {
       const creditQty = parsedQty != null ? parsedQty : printingJob.parts_per_plate;
       db.prepare(`UPDATE jobs SET status = 'finished', finished_at = ? WHERE id = ?`).run(now, printingJob.id);
-      db.prepare(`UPDATE parts SET completed_qty = MAX(0, completed_qty + ?), updated_at = ? WHERE id = ?`)
-        .run(creditQty, now, printingJob.part_id);
+      partLedger.adjustPartQty(db, {
+        partId: printingJob.part_id,
+        delta: creditQty,
+        clamp: true,
+        source: partLedger.SOURCES.OPERATOR_CONFIRM,
+        job: printingJob,
+        printer,
+        note: `Operator confirmed ${creditQty} of ${printingJob.parts_per_plate} good (Complete and Decommission; finish was missed by the server)`,
+        now,
+      });
       settlePart(printingJob.part_id);
       console.log(`[printers] ${printer.name} missed-finish credited ${creditQty} — decommissioning for maintenance`);
     } else if (parsedQty != null) {
-      // Normal case: job already 'finished' and credited the full plate by _handleFinished. If the
-      // operator adjusted the count, apply the delta against what was already booked (same as set-ready).
-      const finishedJob = db.prepare(`
-        SELECT * FROM jobs WHERE printer_id = ? AND status = 'finished'
-        ORDER BY finished_at DESC LIMIT 1
-      `).get(printer.id);
-      if (finishedJob && parsedQty !== finishedJob.parts_per_plate) {
-        const delta = parsedQty - finishedJob.parts_per_plate; // negative = fewer good parts
-        db.prepare(`UPDATE parts SET completed_qty = MAX(0, completed_qty + ?), updated_at = ? WHERE id = ?`)
-          .run(delta, now, finishedJob.part_id);
+      // Normal case: job already 'finished' and credited the full plate by _handleFinished.
+      // Apply the operator's confirmed count to it (same as set-ready). With a job_id the
+      // count is the plate's total good parts and targets confirmCount's shared job rule;
+      // without one, the latest finished job and parts_per_plate, as before.
+      const finishedJob = jobId != null
+        ? confirmCount.finishedConfirmTarget(db, printer.id)
+        : db.prepare(`
+            SELECT * FROM jobs WHERE printer_id = ? AND status = 'finished'
+            ORDER BY finished_at DESC LIMIT 1
+          `).get(printer.id);
+      const applied = finishedJob && confirmCount.applyConfirmedCount(db, {
+        job: finishedJob, printer, confirmedQty: parsedQty, total: jobId != null,
+        via: 'Complete and Decommission', now,
+      });
+      if (applied) {
         settlePart(finishedJob.part_id);
-        console.log(`[printers] ${printer.name} confirmed ${parsedQty}/${finishedJob.parts_per_plate} good on decommission (delta ${delta > 0 ? '+' : ''}${delta})`);
+        console.log(`[printers] ${printer.name} confirmed ${parsedQty}/${finishedJob.parts_per_plate} good on decommission (delta ${applied.delta > 0 ? '+' : ''}${applied.delta})`);
       }
     }
     // Normal case with no qty adjustment: job already 'finished' was credited by _handleFinished — nothing to do.
@@ -412,14 +467,23 @@ module.exports = (db) => {
 
     db.prepare("UPDATE jobs SET status = 'failed' WHERE id = ?").run(job.id);
 
-    if (job.status === 'finished') {
-      // Normal case: job was already credited when FINISHED was seen. Undo the increment.
-      db.prepare(`
-        UPDATE parts SET completed_qty = MAX(0, completed_qty - ?), updated_at = ? WHERE id = ?
-      `).run(job.parts_per_plate, now, job.part_id);
+    // Normal case: job was already credited when FINISHED was seen. Undo what it actually
+    // contributes, which is less than the full plate if an operator already corrected the
+    // count (deducting parts_per_plate here once took a part from 9 to 5 instead of 6).
+    const credited = job.status === 'finished' ? partLedger.jobNetCredit(db, job) : 0;
+    if (credited > 0) {
+      const part = partLedger.adjustPartQty(db, {
+        partId: job.part_id,
+        delta: -credited,
+        clamp: true,
+        source: partLedger.SOURCES.MARKED_FAILED,
+        job,
+        printer,
+        note: req.body?.note ? `Marked as failed print: ${req.body.note}` : 'Marked as failed print',
+        now,
+      });
 
-      // Reload part — reopen if it was closed by this job
-      const part = db.prepare('SELECT * FROM parts WHERE id = ?').get(job.part_id);
+      // Reopen the part if it was closed by this job
       if (part.status === 'closed' && part.completed_qty < part.target_qty) {
         db.prepare("UPDATE parts SET status = 'open', updated_at = ? WHERE id = ?").run(now, part.id);
 

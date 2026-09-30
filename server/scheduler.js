@@ -2,8 +2,10 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const { getDriver } = require('./drivers');
+const { candidateSql, SCHEDULER_COLUMNS } = require('./candidate-query');
 const notifications = require('./notifications');
 const events = require('./events');
+const partLedger = require('./partLedger');
 
 const GCODE_DIR = path.join(__dirname, 'gcode');
 
@@ -33,10 +35,12 @@ class JobScheduler extends EventEmitter {
     this.startedAt = Date.now();
     console.log('[scheduler] Starting job scheduler');
 
+    // Routed through scheduleForPrinter (not _dispatchToPrinter directly) so a
+    // printer that organically goes idle while a batch sweep is already running
+    // gets deferred to the tail of that sweep instead of dispatching concurrently
+    // with it and pushing peak concurrency past dispatch_batch_size.
     this.poller.on('printerIdle', ({ printer }) => {
-      this._dispatchToPrinter(printer).catch((err) =>
-        console.error(`[scheduler] Unhandled error dispatching to ${printer.name}:`, err)
-      );
+      this.scheduleForPrinter(printer);
     });
 
     this.poller.on('statusChange', ({ printer, newStatus }) => {
@@ -165,13 +169,15 @@ class JobScheduler extends EventEmitter {
   }
 
   // Dispatch a single printer, respecting any in-progress sweep.
-  // Use this instead of _dispatchToPrinter directly for set-ready and recommission paths,
-  // so that a printer set ready mid-sweep is added to the end of the current batch sequence
-  // rather than firing concurrently with it.
+  // Every production dispatch path funnels through here instead of calling
+  // _dispatchToPrinter directly (set-ready, recommission, the printerIdle listener,
+  // and _handleFinished's no-job fallback), so a printer that becomes dispatchable
+  // mid-sweep is deferred to the end of the current batch sequence instead of firing
+  // concurrently with it and exceeding dispatch_batch_size.
   scheduleForPrinter(printer) {
     if (this._isSweeping) {
       this._pendingPrinters.push(printer);
-      console.log(`[scheduler] ${printer.name} set ready during sweep — deferred to end of sweep`);
+      console.log(`[scheduler] ${printer.name} became dispatchable during a sweep, deferred to end of sweep`);
       return;
     }
     this._sweepInBatches([printer]).catch(err =>
@@ -308,36 +314,10 @@ class JobScheduler extends EventEmitter {
     let gcodeFullPath = null;
 
     while (true) {
-      const excludeClause = skippedPartIds.length > 0
-        ? `AND parts.id NOT IN (${skippedPartIds.map(() => '?').join(',')})`
-        : '';
-
-      candidate = this.db.prepare(`
-        SELECT
-          parts.id          AS part_id,
-          parts.target_qty,
-          parts.completed_qty,
-          parts.project_id,
-          gcodes.id         AS gcode_id,
-          gcodes.filename,
-          gcodes.filepath,
-          gcodes.parts_per_plate,
-          gcodes.ams_slot
-        FROM parts
-        JOIN gcodes   ON gcodes.part_id    = parts.id
-        JOIN projects ON projects.id       = parts.project_id
-        WHERE parts.status    = 'open'
-          AND projects.status = 'active'
-          AND gcodes.printer_model = ?
-          AND (COALESCE(gcodes.allowed_groups, projects.allowed_groups) IS NULL OR EXISTS (
-            SELECT 1 FROM json_each(COALESCE(gcodes.allowed_groups, projects.allowed_groups)) WHERE value = ?
-          ))
-          AND (COALESCE(gcodes.required_material, projects.required_material) IS NULL OR COALESCE(gcodes.required_material, projects.required_material) = ?)
-          AND (COALESCE(gcodes.required_color, projects.required_color) IS NULL OR COALESCE(gcodes.required_color, projects.required_color) = ?)
-          ${excludeClause}
-        ORDER BY projects.priority ASC, projects.created_at ASC, parts.sort_order ASC, parts.created_at ASC
-        LIMIT 1
-      `).get(printer.model, printer.group_name, printer.loaded_material, printer.loaded_color, ...skippedPartIds);
+      // Eligibility rules and priority ordering live in server/candidate-query.js so the
+      // schedule projection asks the identical question without a second copy to drift.
+      candidate = this.db.prepare(candidateSql(SCHEDULER_COLUMNS, skippedPartIds.length))
+        .get(printer.model, printer.group_name, printer.loaded_material, printer.loaded_color, ...skippedPartIds);
 
       if (!candidate) {
         console.log(`[scheduler] No candidate found for ${printer.name} (model: ${printer.model}) — no open parts with matching G-code in an active project`);
@@ -490,11 +470,12 @@ class JobScheduler extends EventEmitter {
     return jobId;
   }
 
-  // Reserve-then-upload for a single printer, used by callers that dispatch one
-  // printer at a time outside the wave-fill loop (the organic printerIdle listener,
-  // and _handleFinished's fallback dispatch). Kept async so a synchronous throw
-  // inside _reserveJob still surfaces as a rejected promise, same as before this
-  // method was split; callers here use .catch(...) and rely on that.
+  // Reserve-then-upload for a single printer: combines _reserveJob and _executeUpload
+  // for a single dispatch attempt outside the wave-fill loop. Production dispatch
+  // paths call scheduleForPrinter instead, which routes through here only when no
+  // sweep is in progress: that is what keeps a printer dispatched this way from
+  // stacking on top of an in-progress batch sweep beyond dispatch_batch_size. Kept
+  // as its own method (rather than inlined) because tests exercise it directly.
   async _dispatchToPrinter(printer) {
     const reservation = this._reserveJob(printer);
     if (!reservation) return null;
@@ -539,8 +520,10 @@ class JobScheduler extends EventEmitter {
 
     if (!job) {
       console.warn(`[scheduler] FINISHED on ${printer.name} but no printing job found — may be outside system`);
-      // Still try to dispatch the next job
-      this._dispatchToPrinter(printer).catch(() => {});
+      // Still try to dispatch the next job. Routed through scheduleForPrinter, not
+      // _dispatchToPrinter directly, so this defers to the tail of an in-progress
+      // sweep instead of dispatching concurrently with it.
+      this.scheduleForPrinter(printer);
       return;
     }
 
@@ -550,12 +533,18 @@ class JobScheduler extends EventEmitter {
     this.db.prepare(`UPDATE jobs SET status = 'finished', finished_at = ? WHERE id = ?`)
       .run(now, job.id);
 
-    // Increment completed_qty
-    this.db.prepare(`
-      UPDATE parts SET completed_qty = completed_qty + ?, updated_at = ? WHERE id = ?
-    `).run(job.parts_per_plate, now, job.part_id);
-
-    const part = this.db.prepare('SELECT * FROM parts WHERE id = ?').get(job.part_id);
+    // Increment completed_qty (and record it in the part ledger)
+    const part = partLedger.adjustPartQty(this.db, {
+      partId: job.part_id,
+      delta: job.parts_per_plate,
+      source: partLedger.SOURCES.PRINT_FINISHED,
+      job,
+      printer,
+      note: job.status === 'failed'
+        ? 'Printer reported FINISHED after a connection drop this session'
+        : null,
+      now,
+    });
 
     console.log(`[scheduler] ${printer.name} finished — Part "${part.name}" ${part.completed_qty}/${part.target_qty}`);
 

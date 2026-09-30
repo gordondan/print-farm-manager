@@ -4,6 +4,10 @@ const path = require('path');
 const fs = require('fs');
 const router = express.Router();
 
+const zip = require('../zip-reader');
+const { readSlicerMetadata } = require('../slicer-metadata');
+const { normalizePrintTime, normalizeMaterialGrams } = require('../estimate-input');
+
 const GCODE_DIR = path.join(__dirname, '..', 'gcode');
 
 const storage = multer.diskStorage({
@@ -62,56 +66,8 @@ function extractMaterialGramsFromFilename(filename) {
   return null;
 }
 
-// Accepts: bare integer (seconds), HH:MM:SS, H:MM, or component form (2h15m, 1h 30m, etc.)
-function normalizePrintTime(raw) {
-  if (!raw && raw !== 0) return null;
-  const s = String(raw).trim();
-  if (/^\d+$/.test(s)) return parseInt(s, 10);
-  let m = s.match(/^(\d{1,3}):(\d{2}):(\d{2})$/);
-  if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3];
-  m = s.match(/^(\d{1,3}):(\d{2})$/);
-  if (m) return +m[1] * 3600 + +m[2] * 60;
-  let total = 0, found = false;
-  m = s.match(/(\d+)\s*h/i); if (m) { total += +m[1] * 3600; found = true; }
-  m = s.match(/(\d+)\s*m/i); if (m) { total += +m[1] * 60;   found = true; }
-  m = s.match(/(\d+)\s*s/i); if (m) { total += +m[1];        found = true; }
-  return found ? total : null;
-}
-
-// List the entry names of a ZIP archive (a .3mf is a ZIP) by walking the central
-// directory. Plain buffer parsing, no dependency. Returns an array of names,
-// or null when the buffer is not a parseable ZIP.
-// ZIP layout reference: APPNOTE.TXT (PKWARE), sections 4.3.12 and 4.3.16.
-const ZIP_EOCD_SIG    = 0x06054b50; // end of central directory
-const ZIP_CENTRAL_SIG = 0x02014b50; // central directory file header
-function listZipEntryNames(buf) {
-  // EOCD is at the very end, preceded by a comment of up to 65535 bytes.
-  const scanFloor = Math.max(0, buf.length - 22 - 65535);
-  let eocd = -1;
-  for (let i = buf.length - 22; i >= scanFloor; i--) {
-    if (buf.readUInt32LE(i) === ZIP_EOCD_SIG) { eocd = i; break; }
-  }
-  if (eocd === -1) return null;
-
-  const totalEntries = buf.readUInt16LE(eocd + 10);
-  const cdOffset     = buf.readUInt32LE(eocd + 16);
-  // ZIP64 markers: no 3MF slicer output comes close to these limits, but if one
-  // ever does, report "unparseable" rather than misreading offsets.
-  if (totalEntries === 0xffff || cdOffset === 0xffffffff) return null;
-
-  const names = [];
-  let pos = cdOffset;
-  for (let n = 0; n < totalEntries; n++) {
-    if (pos + 46 > buf.length || buf.readUInt32LE(pos) !== ZIP_CENTRAL_SIG) return null;
-    const nameLen    = buf.readUInt16LE(pos + 28);
-    const extraLen   = buf.readUInt16LE(pos + 30);
-    const commentLen = buf.readUInt16LE(pos + 32);
-    if (pos + 46 + nameLen > buf.length) return null;
-    names.push(buf.toString('utf8', pos + 46, pos + 46 + nameLen));
-    pos += 46 + nameLen + extraLen + commentLen;
-  }
-  return names;
-}
+// ZIP walking lives in server/zip-reader.js, shared with the slicer-metadata parser that
+// reads print time and weight out of the same archive.
 
 // The Bambu driver prints exactly Metadata/plate_1.gcode from the uploaded .3mf
 // (see server/drivers/bambu.js, project_file payload). A project file saved
@@ -122,7 +78,7 @@ function listZipEntryNames(buf) {
 function validateSliced3mf(filePath) {
   let names;
   try {
-    names = listZipEntryNames(fs.readFileSync(filePath));
+    names = zip.listEntryNames(fs.readFileSync(filePath));
   } catch (_) {
     names = null;
   }
@@ -138,18 +94,6 @@ function validateSliced3mf(filePath) {
   }
   return 'This .3mf contains no sliced G-code, so the printer would silently ignore it. ' +
          'In Bambu Studio / Orca Slicer: Slice Plate first, then File > Export > Export plate sliced file.';
-}
-
-// Accepts: bare number (grams), "45g", "45.5 grams", "1.2kg", "1.2 kilograms"
-function normalizeMaterialGrams(raw) {
-  if (!raw && raw !== 0) return null;
-  const s = String(raw).trim();
-  if (/^\d+(\.\d+)?$/.test(s)) return parseFloat(s);
-  let m = s.match(/^(\d+(?:\.\d+)?)\s*kg(?:ilograms?)?$/i);
-  if (m) return parseFloat(m[1]) * 1000;
-  m = s.match(/^(\d+(?:\.\d+)?)\s*g(?:rams?)?$/i);
-  if (m) return parseFloat(m[1]);
-  return null;
 }
 
 // scheduler is optional, only needed at runtime for sweepIdlePrinters after an upload
@@ -221,7 +165,25 @@ module.exports = (db, scheduler = null) => {
     // ams_slot: -1 = external spool, 0–N = AMS slot, null = not applicable (non-Bambu)
     const parsedAmsSlot = ams_slot !== undefined && ams_slot !== '' ? parseInt(ams_slot, 10) : null;
 
-    const parsedMaterialGrams = material_grams ? parseFloat(material_grams) : null;
+    // What the sliced file says about itself beats what the client inferred from the
+    // filename: an Orca or Bambu .3mf carries the slicer's own seconds and grams, and a
+    // plain .gcode carries them in its comments. The filename-derived values the client
+    // posts are the fallback for a .bgcode or a file whose slicer wrote neither.
+    // These estimates drive the forward schedule's block lengths, so a real number here
+    // is the difference between a usable projection and a wall of two-hour defaults.
+    const fileMeta = readSlicerMetadata(req.file.path, req.file.originalname);
+
+    const clientEstSecs = est_print_secs ? parseInt(est_print_secs, 10) : null;
+    const resolvedEstSecs = fileMeta.est_print_secs ?? (Number.isFinite(clientEstSecs) ? clientEstSecs : null);
+
+    const clientGrams = material_grams ? parseFloat(material_grams) : null;
+    const parsedMaterialGrams = fileMeta.material_grams ?? (Number.isFinite(clientGrams) ? clientGrams : null);
+
+    if (fileMeta.source !== 'none') {
+      console.log(`[gcodes] Read estimates from ${fileMeta.source} for "${req.file.originalname}": ` +
+        `${fileMeta.est_print_secs ?? 'no'} secs, ${fileMeta.material_grams ?? 'no'} grams`);
+    }
+
     // allowed_groups: JSON array string e.g. '["MK4S Farm","XL Farm"]', or null = all groups
     const parsedAllowedGroups = allowed_groups && allowed_groups !== '' ? allowed_groups : null;
     const parsedRequiredMaterial = required_material && required_material !== '' ? required_material.trim() : null;
@@ -236,7 +198,7 @@ module.exports = (db, scheduler = null) => {
       req.file.originalname,
       req.file.filename,
       parseInt(parts_per_plate, 10),
-      est_print_secs ? parseInt(est_print_secs, 10) : null,
+      resolvedEstSecs,
       parsedMaterialGrams,
       parsedAmsSlot,
       parsedAllowedGroups,
@@ -292,6 +254,14 @@ module.exports = (db, scheduler = null) => {
 
     db.prepare('UPDATE gcodes SET est_print_secs = ?, material_grams = ?, allowed_groups = ?, required_material = ?, required_color = ? WHERE id = ?')
       .run(estPrintSecs, materialGrams, allowedGroups, requiredMaterial, requiredColor, req.params.id);
+
+    // Loosening a G-code's group or filament targeting can make an already-idle printer a
+    // match, and idle printers never re-ask on their own, so sweep when targeting changed.
+    const targetingChanged =
+      allowedGroups    !== gcode.allowed_groups ||
+      requiredMaterial !== gcode.required_material ||
+      requiredColor    !== gcode.required_color;
+    if (targetingChanged && scheduler) scheduler.sweepIdlePrinters();
 
     res.json(db.prepare('SELECT * FROM gcodes WHERE id = ?').get(req.params.id));
   });
