@@ -4,6 +4,7 @@ import PollTimer from '../components/PollTimer';
 import EmptyState from '../components/EmptyState';
 import { useConfirm } from '../useConfirm';
 import { useToast } from '../useToast';
+import NextJobLine from '../garden/NextJobLine'; // garden plot, see garden/README.md
 
 const STATUS_COLORS = {
   PRINTING:   { bg: '#1e3a5f', text: '#60a5fa', label: 'Printing' },
@@ -315,6 +316,7 @@ function PrinterCard({ printer, selected, onToggleSelect, onSetReady, onBadPrint
           </button>
         </div>
       )}
+      <NextJobLine printerId={printer.id} />
     </div>
   );
 }

@@ -22,6 +22,11 @@ module.exports = function mountGarden(app) {
   garden.use('/api/labels', require('./labels/server.cjs')(
     process.env.GARDEN_LABELS_DIR || path.join(__dirname, '..', 'server', 'data', 'garden', 'labels')));
 
+  // Fleet card "Next:" line: read-only preview of what each printer dispatches next.
+  // server/db.js is the process-wide singleton, so this is the same connection
+  // server/index.js uses.
+  garden.use('/api/fleet', require('./fleet/routes')(require('../server/db')));
+
   // Real 404s for missing garden files. Without this they fall through to
   // the SPA catch-all and come back as index.html with a 200 (the label app
   // probes for optional templates like templates/3CU/holder.stl).
