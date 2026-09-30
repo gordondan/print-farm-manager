@@ -5,10 +5,11 @@ const partLedger = require('../partLedger');
 const router  = express.Router();
 
 const GCODE_DIR = path.join(__dirname, '..', 'gcode');
+const PROJECTS_DIR = path.join(__dirname, '..', 'projects');
 
 // scheduler is optional — only needed at runtime for sweepIdlePrinters on reactivate.
 // Tests pass null so there is no live scheduler dependency.
-module.exports = (db, scheduler = null) => {
+module.exports = (db, scheduler = null, { gcodeDir = GCODE_DIR, projectsDir = PROJECTS_DIR } = {}) => {
   router.get('/', (req, res) => {
     const projects = db.prepare('SELECT * FROM projects ORDER BY priority ASC, created_at ASC').all();
     res.json(projects);
@@ -114,7 +115,7 @@ module.exports = (db, scheduler = null) => {
         const gcodes = db.prepare('SELECT * FROM gcodes WHERE part_id = ?').all(part.id);
         for (const gcode of gcodes) {
           const basename = gcode.filepath.split(/[\\/]/).pop();
-          const fullPath = path.join(GCODE_DIR, basename);
+          const fullPath = path.join(gcodeDir, basename);
           if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
           db.prepare('DELETE FROM gcodes WHERE id = ?').run(gcode.id);
         }
@@ -122,6 +123,7 @@ module.exports = (db, scheduler = null) => {
         partLedger.deleteForPart(db, part.id);
         db.prepare('DELETE FROM parts WHERE id = ?').run(part.id);
       }
+      fs.rmSync(path.join(projectsDir, String(project.id)), { recursive: true, force: true });
       db.prepare('DELETE FROM projects WHERE id = ?').run(project.id);
     })();
 

@@ -4,9 +4,9 @@ const path = require('path');
 const fs = require('fs');
 const router = express.Router();
 
-const zip = require('../zip-reader');
 const { readSlicerMetadata } = require('../slicer-metadata');
 const { normalizePrintTime, normalizeMaterialGrams } = require('../estimate-input');
+const { validateSliced3mf } = require('../sliced-3mf');
 
 const GCODE_DIR = path.join(__dirname, '..', 'gcode');
 
@@ -64,36 +64,6 @@ function extractMaterialGramsFromFilename(filename) {
   const g = filename.match(/(?:^|[_\s\-\.])(\d+(?:\.\d+)?)\s*(?:grams?|g)(?:[_\s\-\.\(]|$)/i);
   if (g) return parseFloat(g[1]);
   return null;
-}
-
-// ZIP walking lives in server/zip-reader.js, shared with the slicer-metadata parser that
-// reads print time and weight out of the same archive.
-
-// The Bambu driver prints exactly Metadata/plate_1.gcode from the uploaded .3mf
-// (see server/drivers/bambu.js, project_file payload). A project file saved
-// without slicing has no gcode entry at all, and the printer ignores the print
-// command silently: the job sits in 'printing' forever against an idle machine.
-// Catch that at upload time with an instructive error instead.
-// Returns null when the file is fine, or an error string.
-function validateSliced3mf(filePath) {
-  let names;
-  try {
-    names = zip.listEntryNames(fs.readFileSync(filePath));
-  } catch (_) {
-    names = null;
-  }
-  if (names === null) {
-    return 'This file is not a readable .3mf archive. Export it again from your slicer.';
-  }
-  if (names.includes('Metadata/plate_1.gcode')) return null;
-
-  const otherPlate = names.find(n => /^Metadata\/plate_\d+\.gcode$/.test(n));
-  if (otherPlate) {
-    return `This .3mf contains ${otherPlate.replace('Metadata/', '')} but the farm prints plate_1. ` +
-           'In your slicer, export just the sliced plate (it becomes plate 1 in the exported file).';
-  }
-  return 'This .3mf contains no sliced G-code, so the printer would silently ignore it. ' +
-         'In Bambu Studio / Orca Slicer: Slice Plate first, then File > Export > Export plate sliced file.';
 }
 
 // scheduler is optional, only needed at runtime for sweepIdlePrinters after an upload

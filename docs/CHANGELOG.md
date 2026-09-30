@@ -239,6 +239,7 @@ No change to dispatch behaviour, hold semantics, or any path that credits quanti
 - `server/tests/parts-print-time.test.js` (new, 13 tests): accepted formats, optionality, clearing, validation, and that a quantity-only edit does not wipe the estimate.
 - `server/tests/helpers/build-zip.js`: optional deflate compression and a `buildSliceInfoConfig` fixture.
 - `server/tests/*.test.js` (23 files): `print_time_seconds` added to the inline `parts` schema, which the real schema has had since 2026-04.
+- `server/tests/*.test.js` (22 files): `print_time_seconds` added to the inline `parts` schema, which the real schema has had since 2026-04.
 - `docs/schedule.md` (new), `docs/README.md`, `docs/api.md`, `docs/web-app.md`, `docs/database.md`: documented the page, both endpoints, the estimate fields, the upload parsing, and the freshness model.
 - `CLAUDE.md`: two new sync pairs (the shared candidate query, and the grace window shared with the scheduler).
 
