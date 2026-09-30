@@ -34,7 +34,17 @@ function resolveModel(rawModel, name) {
   return normalizeModel(rawModel) || inferModel(name);
 }
 
-module.exports = (db) => {
+// Loaded filament is compared by exact string equality against project and G-code
+// requirements (server/candidate-query.js), so a stray space typed into the printer's
+// Material field would silently stop it matching "PETG". Trim on the way in; empty
+// clears the value.
+function cleanFilament(v) {
+  return (typeof v === 'string' ? v.trim() : v) || null;
+}
+
+// scheduler is optional, only needed at runtime for sweepIdlePrinters after an edit
+// changes what a printer can print. Tests pass null so there is no live scheduler dependency.
+module.exports = (db, scheduler = null) => {
   // Silently keeps the printer_groups registry a superset of every group name
   // ever assigned to a printer, so a group can never again vanish from a
   // picker just because no printer currently carries it. Zero added friction:
@@ -147,7 +157,7 @@ module.exports = (db) => {
         INSERT INTO printers (name, ip, api_key, serial_number, group_name, type, model, loaded_material, loaded_color, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(name, ip, api_key || '', serial_number || '', group_name || null, printerType, normalized,
-             loaded_material || null, loaded_color || null, Date.now());
+             cleanFilament(loaded_material), cleanFilament(loaded_color), Date.now());
       // Best-effort convenience: a failure here must never turn an already-
       // committed printer creation into a reported error.
       if (group_name && group_name.trim()) {
@@ -177,8 +187,8 @@ module.exports = (db) => {
     }
 
     // loaded_material / loaded_color: if key is present in body, use the value (even if empty → null to clear)
-    const newMaterial = 'loaded_material' in req.body ? (loaded_material || null) : printer.loaded_material;
-    const newColor    = 'loaded_color'    in req.body ? (loaded_color    || null) : printer.loaded_color;
+    const newMaterial = 'loaded_material' in req.body ? cleanFilament(loaded_material) : printer.loaded_material;
+    const newColor    = 'loaded_color'    in req.body ? cleanFilament(loaded_color)    : printer.loaded_color;
 
     // Compute effective new values for all tracked fields (COALESCE: body wins, else keep existing)
     const after = {
@@ -248,6 +258,18 @@ module.exports = (db) => {
         dropConnection(printer.type, printer.id);
         console.log(`[printers] ${after.name} connection settings changed, dropped cached driver connection`);
       }
+
+      // An idle printer only asks for work when it transitions into IDLE, so loading
+      // PETG on a printer that is already idle used to leave it sitting there next to a
+      // PETG part until something else happened to trigger a sweep. Sweep now whenever
+      // the edit changes what this printer is eligible for. Safe to call unconditionally
+      // on those edits: the sweep already filters to idle, unheld, active printers.
+      const targetingChanged =
+        after.model           !== printer.model ||
+        after.group_name      !== printer.group_name ||
+        after.loaded_material !== printer.loaded_material ||
+        after.loaded_color    !== printer.loaded_color;
+      if (targetingChanged && scheduler) scheduler.sweepIdlePrinters();
 
       res.json(db.prepare('SELECT * FROM printers WHERE id = ?').get(req.params.id));
     } catch (err) {

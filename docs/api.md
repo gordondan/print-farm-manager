@@ -106,6 +106,8 @@ Partial update — only fields provided are changed (uses `COALESCE`). All field
 
 Changing `ip`, `api_key`, `serial_number`, or `type` drops the driver's cached connection for this printer, so the new settings take effect on the next poll (about 15 seconds) with no server restart.
 
+Changing `loaded_material`, `loaded_color`, `group_name`, or `model` triggers a scheduler sweep of idle printers, so an already-idle printer that now matches a waiting part is dispatched immediately (idle printers otherwise only ask for work when they transition into IDLE). `loaded_material` and `loaded_color` are trimmed; an empty or whitespace-only value clears the field.
+
 Returns `404` if not found, `409` on name conflict.
 
 ### `DELETE /api/printers/:id`
@@ -328,11 +330,15 @@ Sets project-wide default `required_material` / `required_color`, applied to eve
 
 **Body:** `{ "required_material": "PETG", "required_color": "Red" }`. Either field, empty string, or omitted resolves to `NULL` (no default).
 
+Triggers a scheduler sweep of idle printers, since a new default can make an already-idle printer a match. Returns the updated project, or `404` if not found.
+
 ### `PUT /api/projects/:id/groups`
 
 Sets a project-wide default `allowed_groups`, applied to every G-code in the project that doesn't set its own `allowed_groups` override. Mirrors `PUT /api/gcodes/:id`'s `allowed_groups` field, and follows the same gcode-overrides-project precedence as `/filament` above; see the "Targeting cascade" note in [database.md](database.md).
 
 **Body:** `{ "allowed_groups": ["Rack A", "Rack B"] }`. An empty array (or omitted) clears the project default back to unrestricted.
+
+Triggers a scheduler sweep of idle printers, same reason as `/filament`. Returns the updated project, or `404` if not found.
 
 ### `DELETE /api/projects/:id`
 
@@ -352,18 +358,46 @@ Also includes `active_qty` (same calculation as the list endpoint).
 
 ### `GET /api/parts/:id/dispatch-status`
 
-Diagnostic for the "Why isn't this printing?" button on the Projects page. Mirrors the scheduler's eligibility rules and returns why the part is or isn't dispatching right now.
+Diagnostic for the "Why isn't this printing?" button on the Projects page. Mirrors the scheduler's eligibility rules and returns why the part is or isn't dispatching right now, plus every candidate printer and where it stands.
 
 ```json
 {
-  "dispatchable": false,
-  "reasons": ["gridfinity_2x4_x1c.3mf: all 1 matching printer(s) are busy"],
-  "notes": []
+  "dispatchable": true,
+  "reasons": [],
+  "notes": ["Every ready matching printer has higher-priority work queued first; this part prints after that work"],
+  "gcodes": [
+    {
+      "gcode_id": 12,
+      "filename": "bracket_mk4s.bgcode",
+      "printer_model": "mk4s",
+      "required_material": "PETG",
+      "required_color": null,
+      "allowed_groups": null,
+      "printers": [
+        {
+          "id": 3, "name": "MK4S_03", "status": "IDLE", "is_held": 0,
+          "group_name": "Rack A", "loaded_material": "PETG", "loaded_color": "Black",
+          "state": "ready",
+          "next_up": { "part_id": 7, "part_name": "Hinge", "project_name": "Rush order", "is_this_part": false }
+        },
+        {
+          "id": 4, "name": "MK4S_04", "status": "IDLE", "is_held": 0,
+          "group_name": "Rack A", "loaded_material": "PLA", "loaded_color": "Black",
+          "state": "wrong_filament", "next_up": null
+        }
+      ]
+    }
+  ]
 }
 ```
 
-- `reasons` — populated when `dispatchable` is `false`: global blockers (project not active, part complete, no G-code, remaining qty already covered by in-progress jobs) followed by per-G-code availability problems (no printers of that model, group/material/color mismatch, all matching printers busy or held).
-- `notes` — populated when `dispatchable` is `true`: advisory per-G-code items (e.g. one G-code can dispatch but another has no ready printers).
+- `reasons`: populated when `dispatchable` is `false`: global blockers (project not active, part complete, no G-code, remaining qty already covered by in-progress jobs) followed by per-G-code availability problems (no printers of that model, group/material/color mismatch, all matching printers busy or held).
+- `notes`: populated when `dispatchable` is `true`: advisory per-G-code items (e.g. one G-code can dispatch but another has no ready printers), and a note when every ready matching printer would print a higher-priority part first.
+- `gcodes[]`: one entry per G-code, with the effective targeting after the gcode-overrides-project cascade (`allowed_groups` is a parsed array or `null`).
+- `gcodes[].printers[]`: every active printer of that model, ordered by name. `state` is checked in this order: `wrong_group`, `wrong_filament`, `held` (awaiting operator sign-off), `busy` (not IDLE, FINISHED, or STOPPED), `ready`.
+- `gcodes[].printers[].next_up`: for `ready` printers only, the part the scheduler would dispatch to that printer right now, computed with the scheduler's own candidate query (`server/candidate-query.js`) and ceiling skip; `null` otherwise. Read-only: no job row is written.
+
+Returns `404` if the part does not exist.
 
 ### `GET /api/parts/:id/audit`
 
@@ -536,6 +570,8 @@ Update `est_print_secs`, `material_grams`, `allowed_groups`, `required_material`
 `material_grams` accepts `"45g"`, `"45.5g"`, `"1.2kg"`, bare number. Returns `400` if non-empty and unparseable.
 
 `allowed_groups` is a JSON-encoded array string, matching the shape `POST /api/gcodes/upload` accepts (see above). This G-code's `allowed_groups`, `required_material`, and `required_color` always take precedence over the project's defaults when set; see `PUT /api/projects/:id/groups` and `PUT /api/projects/:id/filament`.
+
+When `allowed_groups`, `required_material`, or `required_color` actually changes, the scheduler sweeps idle printers. An estimate-only edit does not sweep.
 
 Returns the updated G-code record.
 

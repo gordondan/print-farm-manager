@@ -44,6 +44,29 @@ Deliberately manual rather than run at startup: an automatic heal would also hid
 
 ---
 
+## 2026-09-29: Filament and targeting edits dispatch immediately; the dispatch check shows which printer matches
+
+Reported on the farm: a project and a printer were both set to PETG, the part's "Why isn't this printing?" check said it was ready and that a matching printer would pick it up, and nothing printed. There was also no way to tell from the check which printer it meant.
+
+**Root cause.** An idle printer only asks the scheduler for work when the poller sees it transition into IDLE (the `printerIdle` event). Loading PETG on a printer that is already idle, or setting a project's filament or groups, changed eligibility without any transition, and none of those routes swept. The printer sat idle next to a matching part until some unrelated event (an upload, a project activation, a restart) ran a sweep. The check's promise of "the next sweep" was therefore misleading: there is no periodic sweep.
+
+**Fix.** `PUT /api/printers/:id` now sweeps when loaded material, loaded color, group, or model changes; `PUT /api/projects/:id/filament` and `/groups` always sweep; `PUT /api/gcodes/:id` sweeps when its targeting changes. The sweep already filters to idle, unheld, active printers, so this only ever dispatches where an IDLE transition would have. Printer material and color are also trimmed on the way in, since matching is exact string equality and `"PETG "` would silently never match `"PETG"`.
+
+**Printer match list.** `GET /api/parts/:id/dispatch-status` now also returns, per G-code, every active printer of that model with its match state (ready, busy, held, wrong filament, wrong group), what it has loaded, and for ready printers what the scheduler would actually hand it next. That next-up answer comes from the shared candidate query in `server/candidate-query.js` plus the same ceiling skip as `_reserveJob`, so it cannot disagree with dispatch. It exposes a second way "ready" could be misleading: a matching printer that will print a higher-priority part first. The check now says so instead of promising this part. On the Projects page each printer name links to its detail page, and a Dispatch now button appears when a ready printer has this part next.
+
+No change to hold semantics or any path that credits `completed_qty`. Verified by the test suite and against seeded demo data; not yet exercised on the production farm.
+
+### Changes
+- `server/routes/printers.js`: factory takes an optional scheduler; sweep after a targeting-relevant edit; `cleanFilament` trims material and color on create and update.
+- `server/routes/projects.js`: sweep after `PUT /:id/filament` and `PUT /:id/groups`.
+- `server/routes/gcodes.js`: sweep after `PUT /:id` when group, material, or color targeting changes.
+- `server/index.js`: printers router mounted with the scheduler, alongside projects, parts, and gcodes.
+- `server/routes/parts.js`: dispatch-status returns `gcodes[].printers[]` with `state` and `next_up`, and a note when higher-priority work is ahead on every ready printer.
+- `client/src/pages/Projects.jsx`: `PrinterMatchList` under the dispatch check, linked printer names, honest ready message, Dispatch now button.
+- `server/tests/targeting-sweep.test.js` (new, 11 tests): sweep and no-sweep cases for all four routes, trimming, 404 without a sweep.
+- `server/tests/dispatch-status.test.js`: 4 new tests for match states, next-up, higher-priority note, and the ceiling skip; schema gained the columns the shared candidate query reads.
+- `docs/api.md`, `docs/web-app.md`: documented the sweeps, trimming, the new response fields, and the printer list.
+
 ## 2026-09-25: mark-job-failure deducted the full plate after a count correction
 
 Found while building the part audit trail and reproduced in a test: on a part at 10 whose last plate held 4, Complete and Decommission with 3 of 4 good correctly took the count to 9, but marking that same job failed then deducted the full plate (to 5) instead of the 3 it actually contributed (to 6), leaving the part one short. mark-job-failure assumed a finished job always contributes exactly `parts_per_plate`.

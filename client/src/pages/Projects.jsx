@@ -25,6 +25,67 @@ function formatMaterialForInput(grams) {
 
 // Model options are loaded from /api/models at runtime — no hardcoded list here.
 
+// Printer match states from GET /api/parts/:id/dispatch-status, in the order the
+// diagnostic checks them. Fallback covers any state a newer server adds.
+const MATCH_STATE = {
+  ready:          { text: '#86efac', label: 'Ready' },
+  busy:           { text: '#93c5fd', label: 'Busy' },
+  held:           { text: '#fcd34d', label: 'Awaiting sign-off' },
+  wrong_filament: { text: '#fca5a5', label: 'Wrong filament' },
+  wrong_group:    { text: '#94a3b8', label: 'Not in allowed group' },
+  unknown:        { text: '#94a3b8', label: 'Unknown' },
+};
+
+// Per-G-code printer list under the dispatch diagnostic: every active printer of the
+// G-code's model, what it has loaded, whether it matches, and (for ready printers) what
+// the scheduler would actually hand it next. Each name links to the printer's detail
+// page, where loaded material and color are set.
+function PrinterMatchList({ gcodes, partId }) {
+  if (!gcodes || gcodes.length === 0) return null;
+  return (
+    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {gcodes.map(g => {
+        const want = [g.required_material, g.required_color].filter(Boolean).join(' / ') || 'any filament';
+        const groups = g.allowed_groups ? g.allowed_groups.join(', ') : 'any group';
+        return (
+          <div key={g.gcode_id}>
+            <div style={{ color: '#e2e8f0', fontWeight: 600 }}>
+              {g.filename} <span style={{ color: '#64748b', fontWeight: 400 }}>needs {g.printer_model}, {want}, {groups}</span>
+            </div>
+            {g.printers.length === 0 ? (
+              <div style={{ color: '#64748b' }}>No active {g.printer_model} printers.</div>
+            ) : (
+              <div className="match-table" style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) minmax(90px, auto) minmax(110px, auto) 2fr', columnGap: 12, rowGap: 2 }}>
+                {g.printers.map(p => {
+                  const st = MATCH_STATE[p.state] || MATCH_STATE.unknown;
+                  const loaded = [p.loaded_material, p.loaded_color].filter(Boolean).join(' / ') || 'nothing set';
+                  let next = '';
+                  if (p.state === 'ready') {
+                    if (!p.next_up) next = '';
+                    else if (p.next_up.part_id === partId) next = 'Next up: this part';
+                    else next = `Next up: ${p.next_up.part_name} (${p.next_up.project_name}), higher priority`;
+                  } else if (p.state === 'busy' || p.state === 'held') {
+                    next = p.status;
+                  }
+                  return (
+                    <div key={p.id} style={{ display: 'contents' }}>
+                      <Link to={`/printers/${p.id}`} style={{ color: '#60a5fa', textDecoration: 'none' }}>{p.name}</Link>
+                      <span style={{ color: st.text }}>{st.label}</span>
+                      <span style={{ color: p.state === 'wrong_filament' ? '#fca5a5' : '#94a3b8' }}>{loaded}</span>
+                      <span style={{ color: '#64748b' }}>{next}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <style>{`@media (max-width: 600px) { .match-table { grid-template-columns: 1fr 1fr !important; } }`}</style>
+    </div>
+  );
+}
+
 const PROJECT_STATUS = {
   draft:     { bg: '#1f2937', text: '#9ca3af', dot: '#6b7280', label: 'Draft' },
   active:    { bg: '#166534', text: '#4ade80', dot: '#4ade80', label: 'Active' },
@@ -654,6 +715,31 @@ function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamen
     setChecking(false);
   }
 
+  // Any ready printer whose next candidate is this part: that is the only case where
+  // dispatching now would actually start this part.
+  const nextOnSomePrinter = !!dispatchCheck?.gcodes?.some(g =>
+    g.printers.some(p => p.state === 'ready' && p.next_up?.part_id === part.id)
+  );
+  const [dispatching, setDispatching] = useState(false);
+
+  async function dispatchNow() {
+    setDispatching(true);
+    try {
+      const res = await fetch('/api/scheduler/dispatch', { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        onSaved?.('Dispatch failed: ' + (body.error || res.status), 'error');
+      } else {
+        onSaved?.('Dispatch requested');
+        onRefresh();
+      }
+    } catch (err) {
+      onSaved?.('Dispatch failed: ' + err.message, 'error');
+    }
+    setDispatching(false);
+    runDispatchCheck();
+  }
+
   useEffect(() => {
     setHave(String(part.completed_qty));
     setNeed(String(part.target_qty));
@@ -883,11 +969,27 @@ function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamen
           }}>
             {dispatchCheck.dispatchable ? (
               <>
-                Ready to dispatch — a matching idle printer will pick this up on the next sweep.
+                {nextOnSomePrinter
+                  ? 'Ready to dispatch: a matching printer below has this part next.'
+                  : 'Ready to dispatch once higher-priority work on the matching printers is done.'}
                 {dispatchCheck.notes?.length > 0 && (
                   <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: '#a3b3c9' }}>
                     {dispatchCheck.notes.map((n, i) => <li key={i}>{n}</li>)}
                   </ul>
+                )}
+                {nextOnSomePrinter && (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      onClick={dispatchNow}
+                      disabled={dispatching}
+                      style={{
+                        background: '#2563eb', color: '#fff', border: 'none', borderRadius: 4,
+                        padding: '4px 10px', fontSize: 12, cursor: dispatching ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {dispatching ? 'Dispatching…' : 'Dispatch now'}
+                    </button>
+                  </div>
                 )}
               </>
             ) : (
@@ -895,6 +997,7 @@ function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamen
                 {dispatchCheck.reasons.map((r, i) => <li key={i}>{r}</li>)}
               </ul>
             )}
+            <PrinterMatchList gcodes={dispatchCheck.gcodes} partId={part.id} />
           </div>
         )}
       </div>
