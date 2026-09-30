@@ -1,9 +1,9 @@
-// Freshness fingerprint for the forward schedule.
+// Freshness fingerprint for the Print Queue.
 //
-// The schedule is derived state: it is a function of the printers, the open parts, their
+// The queue is derived state: it is a function of the printers, the open parts, their
 // G-code estimates, the project priorities, and the active job rows. The client needs to
 // know when its copy is out of date so it can show a recalculating state instead of
-// silently rendering numbers the server already knows are wrong.
+// silently rendering a list the server already knows is wrong.
 //
 // This is a fingerprint of the inputs rather than a counter that mutation sites increment.
 // A counter needs a bump() call at every write that matters (dispatch, poll, estimate
@@ -14,14 +14,13 @@
 // Deliberately excluded: printers.job_progress and printers.job_time_remaining. Those
 // change on every 15 s poll of every printing printer. Including them would change the
 // fingerprint constantly and pin the UI in a permanent "recalculating" state, which is
-// the same lie as stale data wearing a spinner. Live progress moves the leading edge of
-// the in-progress block, which the client picks up on its own refresh; the fingerprint is
-// for structural change (a job started, an estimate was edited, a part closed).
+// the same lie as stale data wearing a spinner. The fingerprint is for structural change
+// (a job started, an estimate was edited, a part closed).
 //
-// The Print Queue (GET /api/parts/queue) is built from these same inputs and returns this
-// fingerprint too, so a new input to either view belongs in the hash.
+// GET /api/parts/queue returns this fingerprint and GET /api/parts/queue/version serves it
+// alone, so a new input to the queue belongs in the hash.
 //
-// Rows are limited to active projects because only those can be scheduled. That bounds the
+// Rows are limited to active projects because only those can be queued. That bounds the
 // scan on a farm with years of completed project history, and a project's own status is
 // part of the hash, so activating one changes the fingerprint and pulls its parts in.
 
@@ -70,7 +69,7 @@ function fingerprint(db) {
     h.update(`G${g.id}|${g.part_id}|${g.printer_model}|${g.parts_per_plate}|${g.est_print_secs ?? ''}|${g.allowed_groups || ''}|${g.required_material || ''}|${g.required_color || ''};`);
   }
 
-  // Only jobs the projection consumes. A finished job's effect on the schedule is already
+  // Only jobs that are still in flight. A finished job's effect on the schedule is already
   // captured by parts.completed_qty above.
   for (const j of db.prepare(`
     SELECT id, printer_id, part_id, status, parts_per_plate, started_at, created_at

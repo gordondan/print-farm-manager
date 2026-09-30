@@ -1,9 +1,9 @@
-// Cross-page signal that the forward schedule's inputs just changed.
+// Cross-page signal that the Print Queue's inputs just changed.
 //
-// The Schedule page also polls a server-side fingerprint, so it will notice any change on
-// its own within a few seconds. This event exists to make the common case immediate: when
-// an operator edits a print-time estimate and switches to the Schedule tab, the page should
-// already be recalculating rather than showing numbers computed from the old estimate.
+// The Print Queue also polls a server-side fingerprint, so it will notice any change on
+// its own within a few seconds. This event makes the common case immediate: when an
+// operator edits a part on the Projects page and switches to Fleet, the queue should
+// already be recalculating rather than showing a list built from the old inputs.
 //
 // Window CustomEvent rather than shared state, following the farmNameChanged pattern in
 // App.jsx: this client has no providers, no context, and no state library.

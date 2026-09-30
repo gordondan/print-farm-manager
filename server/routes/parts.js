@@ -4,7 +4,7 @@ const fs      = require('fs');
 const router  = express.Router();
 
 const { normalizePrintTime } = require('../estimate-input');
-const { candidateSql, PROJECTION_COLUMNS } = require('../candidate-query');
+const { candidateSql, NEXT_UP_COLUMNS } = require('../candidate-query');
 const { fingerprint } = require('../schedule-state');
 
 const GCODE_DIR = path.join(__dirname, '..', 'gcode');
@@ -15,8 +15,8 @@ const PRINT_TIME_HINT =
   'Cannot parse print time. Use formats like "2h15m", "90m", or "1:30:00".';
 
 // Turns the optional operator-typed estimate into seconds, or reports why it could not.
-// An empty value is not an error: the estimate is optional, and a part without one is
-// scheduled at the documented default block length (see server/projection.js).
+// An empty value is not an error: the estimate is optional, and a part without one simply
+// has no estimate.
 // Returns { ok: true, seconds } or { ok: false, error }.
 function resolvePrintTime(raw) {
   if (raw === undefined || raw === null || raw === '') return { ok: true, seconds: null };
@@ -71,7 +71,7 @@ module.exports = (db, scheduler = null) => {
   function nextUpFor(printer) {
     const skip = [];
     while (true) {
-      const row = db.prepare(candidateSql(PROJECTION_COLUMNS, skip.length)).get(
+      const row = db.prepare(candidateSql(NEXT_UP_COLUMNS, skip.length)).get(
         printer.model, printer.group_name, printer.loaded_material, printer.loaded_color, ...skip
       );
       if (!row) return null;
@@ -263,6 +263,12 @@ module.exports = (db, scheduler = null) => {
       ? db.prepare(`SELECT parts.*, ${ACTIVE_QTY_SQL} FROM parts WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC`).all(project_id)
       : db.prepare(`SELECT parts.*, ${ACTIVE_QTY_SQL} FROM parts ORDER BY sort_order ASC, created_at ASC`).all();
     res.json(parts);
+  });
+
+  // GET /api/parts/queue/version: just the fingerprint, cheap enough for the queue page to
+  // poll. Static path, declared above /:id.
+  router.get('/queue/version', (_req, res) => {
+    res.json({ version: fingerprint(db) });
   });
 
   // GET /api/parts/queue: every open part of every active project, in the order the

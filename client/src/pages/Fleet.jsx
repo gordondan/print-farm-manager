@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import PollTimer from '../components/PollTimer';
 import EmptyState from '../components/EmptyState';
+import PrintQueue from '../components/PrintQueue';
 import { useConfirm } from '../useConfirm';
 import { useToast } from '../useToast';
 
@@ -321,6 +322,7 @@ function PrinterCard({ printer, selected, onToggleSelect, onSetReady, onBadPrint
 
 export default function Fleet() {
   const navigate                              = useNavigate();
+  const location                              = useLocation();
   const [confirm, confirmModal]               = useConfirm();
   const [showToast, toastEl]                  = useToast();
   const [printers, setPrinters]               = useState([]);
@@ -333,6 +335,15 @@ export default function Fleet() {
   const [allModels, setAllModels]             = useState([]);
   // { printerId, printerName, jobs, selectedJobId, isHeld }
   const [linkJobModal, setLinkJobModal]       = useState(null);
+
+  // In-page anchor (sidebar "Print Queue" link is /fleet#print-queue). location.key changes
+  // on every navigation, including a repeat click on the link while already at the hash;
+  // `loading` re-runs it once the fleet has rendered so the section has its final position.
+  useEffect(() => {
+    if (!location.hash) return;
+    const el = document.getElementById(location.hash.slice(1));
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [location.key, location.hash, loading]);
 
   useEffect(() => {
     fetch('/api/models').then(r => r.json()).then(setAllModels).catch(() => {});
@@ -891,6 +902,8 @@ export default function Fleet() {
           </div>
         </div>
       ))}
+
+      <PrintQueue />
     </div>
   );
 }

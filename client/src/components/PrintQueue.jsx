@@ -1,22 +1,36 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../useToast';
-import EmptyState from '../components/EmptyState';
+import EmptyState from './EmptyState';
 import { SCHEDULE_DIRTY_EVENT } from '../scheduleDirty';
 
 // Every open part of every active project, in the order the scheduler considers them, with
 // the printers that can run each one. A part with no matching printer says why, so an
 // operator can fix the targeting or the loaded filament instead of wondering why it sits.
 //
-// Freshness follows Schedule.jsx rather than the 15 s poll used on Fleet: the queue is
-// built from the same inputs as the forward schedule, so it shares the schedule's
-// fingerprint. A cheap version poll (and the same-tab dirty event) flips the page into a
+// Rendered at the bottom of the Fleet page (anchor #print-queue). Freshness does not follow
+// the 15 s poll used by the fleet cards: the queue carries a fingerprint of its inputs
+// (server/schedule-state.js). A cheap version poll (and the same-tab dirty event) flips the page into a
 // visible recalculating state the moment the farm changes, instead of leaving an old
 // list on screen looking current. The slow full refresh only catches display-name edits,
 // which the fingerprint deliberately does not hash.
 
 const VERSION_POLL_MS = 5000;  // cheap staleness check
 const FALLBACK_MS     = 60000; // picks up renames, which do not move the fingerprint
+
+// Tag colors that identify a printer rather than its state, matched case-insensitively
+// against the printer's name, group, and model. First match wins; any other printer keeps
+// the state colors below. The state is still readable from the dot and the tooltip.
+const IDENTITY_COLORS = [
+  { test: /blue\s*finger/i,   bg: '#1d4ed8', border: '#3b82f6', text: '#eff6ff' },
+  { test: /yellow\s*finger/i, bg: '#713f12', border: '#eab308', text: '#fde047' },
+  { test: /sv08/i,            bg: '#0c4a6e', border: '#38bdf8', text: '#bae6fd' },
+];
+
+function identityColor(m) {
+  const haystack = [m.name, m.group_name, m.model].filter(Boolean).join(' ');
+  return IDENTITY_COLORS.find(c => c.test.test(haystack)) || null;
+}
 
 // Printer match states from GET /api/parts/queue, same meaning as on the Projects page
 // dispatch diagnostic. Fallback covers any state a newer server adds.
@@ -43,18 +57,19 @@ function tagTitle(m) {
 function PrinterTag({ match }) {
   const st = MATCH_STATE[match.state] || MATCH_STATE.unknown;
   const isNext = match.state === 'ready' && match.next_up?.is_this_part;
+  const tag = identityColor(match) || st;
   return (
     <Link
       to={`/printers/${match.id}`}
       title={tagTitle(match)}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
-        background: st.bg, border: `1px solid ${isNext ? st.text : st.border}`,
-        color: st.text, borderRadius: 999, padding: '3px 10px',
+        background: tag.bg, border: `1px solid ${isNext ? tag.text : tag.border}`,
+        color: tag.text, borderRadius: 999, padding: '3px 10px',
         fontSize: 12, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap',
       }}
     >
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: st.text, flexShrink: 0 }} />
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: st.text, flexShrink: 0, boxShadow: '0 0 0 1px rgba(0,0,0,0.4)' }} />
       {match.name}
       {isNext && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4 }}>NEXT</span>}
     </Link>
@@ -150,11 +165,11 @@ export default function PrintQueue() {
     return () => clearInterval(interval);
   }, [fetchQueue]);
 
-  // Staleness check against the shared schedule fingerprint.
+  // Staleness check against the queue fingerprint.
   useEffect(() => {
     const check = async () => {
       try {
-        const res = await fetch('/api/schedule/version');
+        const res = await fetch('/api/parts/queue/version');
         if (!res.ok) return;
         const { version } = await res.json();
         if (versionRef.current && version !== versionRef.current) {
@@ -176,15 +191,20 @@ export default function PrintQueue() {
     return () => window.removeEventListener(SCHEDULE_DIRTY_EVENT, onDirty);
   }, [fetchQueue]);
 
-  const heading = <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Print Queue</h1>;
+  const heading = <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Print Queue</h2>;
+  const section = (children) => (
+    <section id="print-queue" style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #1e2433', scrollMarginTop: 16 }}>
+      {children}
+    </section>
+  );
 
   if (loading) {
-    return <div>{heading}<p style={{ color: '#64748b', marginTop: 16 }}>Loading…</p></div>;
+    return section(<>{heading}<p style={{ color: '#64748b', marginTop: 16 }}>Loading…</p></>);
   }
 
   if (!data && loadError) {
-    return (
-      <div>
+    return section(
+      <>
         {toastEl}
         {heading}
         <div style={{
@@ -200,7 +220,7 @@ export default function PrintQueue() {
             }}
           >Retry</button>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -208,8 +228,8 @@ export default function PrintQueue() {
   const unmatchedCount = parts.filter(p => p.matches.length === 0).length;
   const shown = onlyUnmatched ? parts.filter(p => p.matches.length === 0) : parts;
 
-  return (
-    <div>
+  return section(
+    <>
       {toastEl}
 
       <style>{`
@@ -282,6 +302,6 @@ export default function PrintQueue() {
           {shown.map((p) => <QueueRow key={p.part_id} part={p} />)}
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -1,21 +1,15 @@
 // The dispatch candidate predicate, in exactly one place.
 //
-// Two callers need to answer "what would this printer print next?": the scheduler, which
-// actually dispatches (server/scheduler.js, _reserveJob), and the forward-looking schedule,
-// which projects the queue without touching anything (server/projection.js). Two copies of
-// this WHERE clause would drift the first time a targeting rule changed, and a schedule
-// that quietly disagrees with dispatch is worse than no schedule: the operator plans a
-// shift around a projection the farm will not follow.
+// The scheduler asks "what would this printer print next?" (server/scheduler.js,
+// _reserveJob). The predicate lives here so the eligibility contract has one home.
 //
 // What is shared is the predicate and the ordering, because those are the eligibility
 // contract: open part, active project, matching printer model, group/material/color
 // targeting where a per-gcode value overrides the project default, ordered by project
 // priority, then project age, then part sort_order, then part age.
 //
-// What is NOT shared is the SELECT list. Each caller names the columns it needs (the
-// projection wants the time estimates and display names the scheduler has no use for).
-// Keeping the lists separate means adding a column for one caller cannot widen the other's
-// query, which is what keeps this refactor behaviour-neutral for dispatch.
+// The SELECT list is passed in by each caller (the scheduler and the queue's next-up lookup),
+// so one caller's columns never widen the other's query.
 //
 // GET /api/parts/:id/dispatch-status in routes/parts.js mirrors these same rules in JS to
 // explain them one part at a time, and GET /api/parts/queue reuses that mirror plus this
@@ -48,9 +42,7 @@ ${selectColumns}
       `;
 }
 
-// Exactly the columns _reserveJob reads. Unchanged from when this query lived inline in
-// scheduler.js: dispatch must not start seeing new columns as a side effect of the
-// schedule needing them.
+// Exactly the columns _reserveJob reads.
 const SCHEDULER_COLUMNS = `          parts.id          AS part_id,
           parts.target_qty,
           parts.completed_qty,
@@ -61,9 +53,9 @@ const SCHEDULER_COLUMNS = `          parts.id          AS part_id,
           gcodes.parts_per_plate,
           gcodes.ams_slot`;
 
-// The projection additionally needs the two time estimates (to size a block) and the
-// display names (to label one).
-const PROJECTION_COLUMNS = `          parts.id          AS part_id,
+// The columns the Print Queue's "next up" lookup (routes/parts.js, nextUpFor) reads: the
+// part and project display names alongside the quantities and G-code identity.
+const NEXT_UP_COLUMNS = `          parts.id          AS part_id,
           parts.name        AS part_name,
           parts.target_qty,
           parts.completed_qty,
@@ -75,4 +67,4 @@ const PROJECTION_COLUMNS = `          parts.id          AS part_id,
           gcodes.parts_per_plate,
           gcodes.est_print_secs`;
 
-module.exports = { candidateSql, SCHEDULER_COLUMNS, PROJECTION_COLUMNS };
+module.exports = { candidateSql, SCHEDULER_COLUMNS, NEXT_UP_COLUMNS };

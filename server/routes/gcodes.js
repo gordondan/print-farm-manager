@@ -139,8 +139,6 @@ module.exports = (db, scheduler = null) => {
     // filename: an Orca or Bambu .3mf carries the slicer's own seconds and grams, and a
     // plain .gcode carries them in its comments. The filename-derived values the client
     // posts are the fallback for a .bgcode or a file whose slicer wrote neither.
-    // These estimates drive the forward schedule's block lengths, so a real number here
-    // is the difference between a usable projection and a wall of two-hour defaults.
     const fileMeta = readSlicerMetadata(req.file.path, req.file.originalname);
 
     const clientEstSecs = est_print_secs ? parseInt(est_print_secs, 10) : null;

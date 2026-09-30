@@ -1,25 +1,22 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Link, Navigate, useLocation } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Fleet from './pages/Fleet';
 import Printers from './pages/Printers';
 import PrinterDetail from './pages/PrinterDetail';
 import Projects from './pages/Projects';
 import Jobs from './pages/Jobs';
-import Schedule from './pages/Schedule';
-import PrintQueue from './pages/PrintQueue';
 import Settings from './pages/Settings';
 import Decommissioned from './pages/Decommissioned';
 
 const NAV_ITEMS = [
   { to: '/',               label: 'Dashboard' },
   { to: '/fleet',          label: 'Fleet',         end: true },
-  // Sub-page of Fleet: indented under it in the sidebar.
-  { to: '/fleet/queue',    label: 'Print Queue',   child: true },
+  // Anchor into the Fleet page (the queue renders below the fleet): indented under it.
+  { to: '/fleet#print-queue', label: 'Print Queue', child: true, hash: '#print-queue' },
   { to: '/printers',       label: 'Printers',      end: true },
   { to: '/projects',       label: 'Projects' },
   { to: '/jobs',           label: 'Jobs' },
-  { to: '/schedule',       label: 'Schedule' },
   { to: '/decommissioned', label: 'Decommissioned' },
   { to: '/settings',       label: 'Settings' },
 ];
@@ -36,6 +33,27 @@ const navLinkStyle = ({ isActive }) => ({
   transition: 'background 0.15s',
   whiteSpace: 'nowrap',
 });
+
+// One nav entry. Plain entries are NavLinks. A hash entry is an in-page anchor: NavLink
+// ignores the hash when deciding what is active, which would light up both Fleet and its
+// anchor, so the active state is computed here from pathname plus hash instead.
+function NavItem({ item, styleFn }) {
+  const { pathname, hash } = useLocation();
+  if (!item.hash) {
+    return (
+      <NavLink
+        to={item.to}
+        end={item.to === '/' || !!item.end}
+        // Fleet yields the highlight to its Print Queue anchor while that anchor is open.
+        style={({ isActive }) => styleFn({ isActive: isActive && !(item.to === '/fleet' && hash === '#print-queue') })}
+      >
+        {item.label}
+      </NavLink>
+    );
+  }
+  const isActive = pathname === '/fleet' && hash === item.hash;
+  return <Link to={item.to} style={styleFn({ isActive })}>{item.label}</Link>;
+}
 
 export default function App() {
   // Operator-configurable farm name (Settings → Farm Name)
@@ -77,17 +95,14 @@ export default function App() {
             <div style={{ fontWeight: 400, fontSize: 11, color: '#475569' }}>Print Farm Manager</div>
           </div>
           {NAV_ITEMS.map((item) => (
-            <NavLink
+            <NavItem
               key={item.to}
-              to={item.to}
-              end={item.to === '/' || !!item.end}
-              style={(state) => ({
+              item={item}
+              styleFn={(state) => ({
                 ...navLinkStyle(state),
                 ...(item.child && { marginLeft: 12, padding: '6px 12px', fontSize: 13 }),
               })}
-            >
-              {item.label}
-            </NavLink>
+            />
           ))}
         </nav>
 
@@ -95,11 +110,10 @@ export default function App() {
         <nav id="topbar">
           <span style={{ fontWeight: 800, fontSize: 14, color: '#e2e8f0', marginRight: 8 }}>{farmName}</span>
           {NAV_ITEMS.map((item) => (
-            <NavLink
+            <NavItem
               key={item.to}
-              to={item.to}
-              end={item.to === '/' || !!item.end}
-              style={({ isActive }) => ({
+              item={item}
+              styleFn={({ isActive }) => ({
                 padding: '5px 10px',
                 borderRadius: 6,
                 color: isActive ? '#fff' : '#94a3b8',
@@ -108,9 +122,7 @@ export default function App() {
                 fontSize: 13,
                 fontWeight: isActive ? 700 : 400,
               })}
-            >
-              {item.label}
-            </NavLink>
+            />
           ))}
         </nav>
 
@@ -119,12 +131,12 @@ export default function App() {
           <Routes>
             <Route path="/"                element={<Dashboard />} />
             <Route path="/fleet"           element={<Fleet />} />
-            <Route path="/fleet/queue"     element={<PrintQueue />} />
+            {/* The queue used to be its own page; keep old bookmarks working. */}
+            <Route path="/fleet/queue"     element={<Navigate to="/fleet#print-queue" replace />} />
             <Route path="/printers"        element={<Printers />} />
             <Route path="/printers/:id"    element={<PrinterDetail />} />
             <Route path="/projects"        element={<Projects />} />
             <Route path="/jobs"            element={<Jobs />} />
-            <Route path="/schedule"        element={<Schedule />} />
             <Route path="/decommissioned"  element={<Decommissioned />} />
             <Route path="/settings"        element={<Settings />} />
           </Routes>

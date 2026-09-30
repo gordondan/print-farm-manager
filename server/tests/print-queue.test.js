@@ -227,4 +227,13 @@ describe('GET /api/parts/queue', () => {
     const after = (await request(app).get('/api/parts/queue')).body.version;
     expect(after).not.toBe(before);
   });
+
+  test('GET /queue/version returns the same fingerprint as the queue payload', async () => {
+    const projectId = seedProject();
+    seedPart(projectId);
+    const queue   = await request(app).get('/api/parts/queue');
+    const version = await request(app).get('/api/parts/queue/version');
+    expect(version.status).toBe(200);
+    expect(version.body.version).toBe(queue.body.version);
+  });
 });

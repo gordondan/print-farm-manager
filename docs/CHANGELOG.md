@@ -2,6 +2,35 @@
 
 ---
 
+## 2026-09-30: Print Queue moves into Fleet, Schedule page removed, printer tag colours
+
+The Print Queue was a separate page under Fleet, and the Schedule page (forward projection of what each printer runs next) was not being used. The queue now renders directly below the printer grid on the Fleet page, and the sidebar's "Print Queue" entry is an in-page anchor (`/fleet#print-queue`) that scrolls to it and highlights itself instead of Fleet. The old `/fleet/queue` URL redirects to the anchor so bookmarks keep working. The Schedule page, its projection engine, and its endpoints are deleted.
+
+**Tag colours.** Queue tags for printers named Blue Finger, Yellow Finger, and SV08 (matched against the printer's name, group, or model) are now blue, yellow, and light blue, so the operator can tell them apart at a glance. Other printers keep the ready/busy/held colours. The small dot on every tag still shows the state.
+
+**Freshness endpoint moved.** The queue's staleness poll used `GET /api/schedule/version`. That endpoint is gone; the same fingerprint is now `GET /api/parts/queue/version`, backed by the unchanged `server/schedule-state.js`. The fingerprint tests moved to `server/tests/queue-fingerprint.test.js`.
+
+**Left in place.** `parts.print_time_seconds` and `gcodes.est_print_secs` (and their parsers) stay: they are stored data and nothing in the schema changed, but no screen plans time from them now. Also unchanged: dispatch behaviour and every `completed_qty` path.
+
+`npm run build` succeeds and the server suite passes when run serially except `project-bundles.test.js` (two failures that also fail on an untouched checkout). Parallel runs show an occasional flake in suites that share the gcode directory, on an untouched checkout too. The UI was not exercised in a browser, and no printer hardware is involved.
+
+### Changes
+
+- `client/src/pages/Schedule.jsx`, `server/projection.js`, `server/routes/schedule.js`, `docs/schedule.md`: deleted
+- `server/tests/schedule-projection.test.js`, `server/tests/schedule-route.test.js`: deleted; fingerprint cases kept in `server/tests/queue-fingerprint.test.js`
+- `server/index.js`: `/api/schedule` no longer mounted
+- `server/routes/parts.js`: added `GET /api/parts/queue/version`; `PROJECTION_COLUMNS` renamed `NEXT_UP_COLUMNS`
+- `server/candidate-query.js`, `server/schedule-state.js`, `server/scheduler.js`, `server/routes/gcodes.js`: comments no longer describe a projection
+- `server/tests/print-queue.test.js`: test for the version endpoint
+- `client/src/pages/PrintQueue.jsx` -> `client/src/components/PrintQueue.jsx`: now a section with `id="print-queue"`, identity tag colours, polls the new version endpoint
+- `client/src/pages/Fleet.jsx`: renders the queue below the grid and scrolls to a URL hash
+- `client/src/App.jsx`: `NavItem` with anchor support, Schedule route and nav entry removed, `/fleet/queue` redirect
+- `client/src/pages/Projects.jsx`, `client/src/scheduleDirty.js`: wording no longer mentions the Schedule page
+- `CLAUDE.md`: removed the projection references from the sync pairs table
+- `docs/api.md`, `docs/web-app.md`, `docs/database.md`, `docs/README.md`: Schedule sections removed, queue docs updated
+
+---
+
 ## 2026-09-30: Print Queue page under Fleet
 
 The dispatch check on the Projects page explains one part at a time, and the Schedule page shows time rather than eligibility. Neither answers the question an operator asks walking the floor: "what is waiting, in what order, and which printers can take it?" The new Print Queue page (sidebar, indented under Fleet, at `/fleet/queue`) lists every open part of every active project in the scheduler's own order, with a tag for each printer that matches the part (model, group, loaded filament) coloured by whether it is ready, busy, or awaiting sign-off. `NEXT` marks a ready printer that would print this part on its next dispatch. A part with no matching printer shows why instead: no G-code, no active printer of that model, none in the allowed groups, or none with the required filament loaded.

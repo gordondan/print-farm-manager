@@ -28,7 +28,6 @@ const modelsRouter       = require('./routes/models')(db);
 const groupsRouter       = require('./routes/groups')(db);
 const filamentsRouter    = require('./routes/filaments')(db);
 const printerJobsRouter  = require('./routes/printer-jobs')(db);
-const scheduleRouter     = require('./routes/schedule')(db);
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -44,7 +43,6 @@ app.use('/api/settings',        settingsRouter);
 app.use('/api/models',          modelsRouter);
 app.use('/api/groups',          groupsRouter);
 app.use('/api/filaments',       filamentsRouter);
-app.use('/api/schedule',        scheduleRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

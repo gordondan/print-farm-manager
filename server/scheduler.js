@@ -310,7 +310,7 @@ class JobScheduler extends EventEmitter {
 
     while (true) {
       // Eligibility rules and priority ordering live in server/candidate-query.js so the
-      // schedule projection asks the identical question without a second copy to drift.
+      // eligibility contract has a single home.
       candidate = this.db.prepare(candidateSql(SCHEDULER_COLUMNS, skippedPartIds.length))
         .get(printer.model, printer.group_name, printer.loaded_material, printer.loaded_color, ...skippedPartIds);
 

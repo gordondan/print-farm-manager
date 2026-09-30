@@ -111,7 +111,7 @@ A Part is **open** while `completed_qty < target_qty`. It transitions to **close
 
 `sort_order` controls dispatch priority within a project — the scheduler picks the lowest `sort_order` part first. Set via `PUT /api/parts/reorder`. New parts default to `0` and fall back to `created_at` as a tiebreaker.
 
-`print_time_seconds` is the optional operator estimate of how long one plate of this part takes, set on the Add Part form or a part's details panel (`print_time` on `POST`/`PUT /api/parts`). It exists for the forward schedule: a part typically has no sliced G-code yet when it is created, and a schedule needs some block length to draw. It is a fallback only. `gcodes.est_print_secs` always wins where it is set, because that figure is per printer model and comes from the sliced file itself. When neither is set, the schedule draws a two-hour block and marks the time as unknown (see [docs/schedule.md](schedule.md)).
+`print_time_seconds` is the optional operator estimate of how long one plate of this part takes, set on the Add Part form or a part's details panel (`print_time` on `POST`/`PUT /api/parts`). A part typically has no sliced G-code yet when it is created, so this gives it an estimate in the meantime. It is a fallback only. `gcodes.est_print_secs` always wins where it is set, because that figure is per printer model and comes from the sliced file itself. Nothing currently reads it to plan time.
 
 `material_grams` on parts is a legacy column retained for schema compatibility but no longer written to. Material estimates are stored per-gcode (see below) so they can vary by printer model.
 

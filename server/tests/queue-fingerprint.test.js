@@ -1,18 +1,15 @@
-// Route tests for GET /api/schedule and GET /api/schedule/version.
+// Tests for the queue freshness fingerprint (server/schedule-state.js), served as
+// GET /api/parts/queue/version.
 //
-// The version endpoint is the page's staleness signal, so its contract is as important as
-// the projection itself: it must move when something structural changes, and it must NOT
+// It is the Print Queue's staleness signal, so its contract matters: it must move when something structural changes, and it must NOT
 // move on live poll progress. A fingerprint that changed every 15 s would pin the UI in a
 // permanent "recalculating" state, which is just stale data wearing a spinner.
 
-const request  = require('supertest');
-const express  = require('express');
 const Database = require('better-sqlite3');
 
 const { fingerprint } = require('../schedule-state');
 
 let db;
-let app;
 
 beforeEach(() => {
   jest.resetModules();
@@ -66,80 +63,9 @@ beforeEach(() => {
       VALUES (1, 'mk4s', 'bracket.gcode', 'bracket.gcode', 1, 3600, 1);
   `);
 
-  app = express();
-  app.use(express.json());
-  app.use('/api/schedule', require('../routes/schedule')(db));
 });
 
-describe('GET /api/schedule', () => {
-  test('returns the projection with its assumptions and lanes', async () => {
-    const res = await request(app).get('/api/schedule');
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({
-      horizon_hours: 24,
-      truncated: false,
-      assumptions: {
-        default_print_secs: 7200,
-        changeover_secs: 900,
-        staffed_start_hour: 6,
-        staffed_end_hour: 22,
-      },
-    });
-    expect(res.body.version).toEqual(expect.any(String));
-    expect(res.body.printers).toHaveLength(1);
-    expect(res.body.blocks).toHaveLength(4);
-    expect(res.body.blocks[0]).toMatchObject({
-      kind: 'projected',
-      part_name: 'Bracket',
-      project_name: 'Proj',
-      est_secs: 3600,
-      time_source: 'gcode',
-    });
-  });
-
-  test('honours an explicit horizon', async () => {
-    const res = await request(app).get('/api/schedule?horizon_hours=2');
-    expect(res.status).toBe(200);
-    expect(res.body.horizon_hours).toBe(2);
-    // Only the plates that fit inside two hours are placed; the rest is reported.
-    expect(res.body.truncated).toBe(true);
-    expect(res.body.unscheduled[0]).toMatchObject({ part_name: 'Bracket', reason: 'beyond_horizon' });
-  });
-
-  test.each([
-    ['0',    'zero'],
-    ['-5',   'negative'],
-    ['abc',  'non-numeric'],
-    ['9999', 'beyond the maximum'],
-  ])('rejects a %s horizon with 400', async (value) => {
-    const res = await request(app).get(`/api/schedule?horizon_hours=${value}`);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/horizon_hours/);
-  });
-
-  test('an empty horizon parameter falls back to the default', async () => {
-    const res = await request(app).get('/api/schedule?horizon_hours=');
-    expect(res.status).toBe(200);
-    expect(res.body.horizon_hours).toBe(24);
-  });
-
-  test('an empty farm is a valid, empty schedule', async () => {
-    db.prepare('DELETE FROM printers').run();
-    const res = await request(app).get('/api/schedule');
-    expect(res.status).toBe(200);
-    expect(res.body.printers).toEqual([]);
-    expect(res.body.blocks).toEqual([]);
-  });
-});
-
-describe('GET /api/schedule/version', () => {
-  test('returns a fingerprint matching the projection payload', async () => {
-    const versionRes  = await request(app).get('/api/schedule/version');
-    const scheduleRes = await request(app).get('/api/schedule');
-    expect(versionRes.status).toBe(200);
-    expect(versionRes.body.version).toBe(scheduleRes.body.version);
-  });
-
+describe('fingerprint', () => {
   test('is stable when nothing changes', () => {
     expect(fingerprint(db)).toBe(fingerprint(db));
   });
@@ -178,7 +104,7 @@ describe('GET /api/schedule/version', () => {
 
   test('does NOT change on live poll progress', () => {
     // job_progress and job_time_remaining are rewritten for every printing printer on
-    // every 15 s poll. They move the leading edge of the in-progress block, which the
+    // every 15 s poll. They are display-only, which the
     // client picks up on its own refresh, and must not be reported as staleness.
     db.prepare(`INSERT INTO jobs (part_id, printer_id, gcode_id, parts_per_plate, status, started_at, created_at)
                 VALUES (1, 1, 1, 1, 'printing', 10, 5)`).run();
@@ -192,7 +118,7 @@ describe('GET /api/schedule/version', () => {
   });
 
   test('does NOT change when a finished job is added to history', () => {
-    // A finished job's effect on the schedule is already carried by parts.completed_qty.
+    // A finished job's effect on the queue is already carried by parts.completed_qty.
     const before = fingerprint(db);
     db.prepare(`INSERT INTO jobs (part_id, printer_id, gcode_id, parts_per_plate, status,
                                   started_at, finished_at, created_at)

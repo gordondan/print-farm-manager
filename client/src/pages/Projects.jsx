@@ -544,8 +544,7 @@ function GcodeEstimateRow({ gc, onDelete, onSaved, filamentTypes, filamentColors
     });
     setSaving(false);
     if (res.ok) {
-      // A changed print time changes every block this G-code would produce on the
-      // schedule, so tell an open Schedule page immediately.
+      // A changed estimate is a Print Queue input, so tell an open queue immediately.
       signalScheduleDirty();
       onSaved?.('Saved');
     } else {
@@ -689,8 +688,8 @@ function GcodeEstimateRow({ gc, onDelete, onSaved, filamentTypes, filamentColors
 function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamentTypes, filamentColors, projectMaterial, projectColor, projectGroups, groups }) {
   const [have, setHave] = useState(String(part.completed_qty));
   const [need, setNeed] = useState(String(part.target_qty));
-  // Part-level estimated time to print: the schedule's fallback block length for this part
-  // when a G-code has no figure of its own.
+  // Part-level estimated time to print: the fallback for this part when a G-code has
+  // no figure of its own.
   const [partTime, setPartTime] = useState(formatDurationForInput(part.print_time_seconds));
   const [saving, setSaving] = useState(false);
   const [qtyError, setQtyError] = useState(null);
@@ -793,7 +792,7 @@ function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamen
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       // print_time is always sent so clearing the field clears the estimate; an empty
-      // string means "no estimate", which the schedule draws at its documented default.
+      // string means "no estimate".
       body: JSON.stringify({ completed_qty: newHave, target_qty: newNeed, print_time: newTime }),
     });
     setSaving(false);
@@ -888,7 +887,7 @@ function PartDetailsPanel({ part, gcodes, onRefresh, onSaved, onConfirm, filamen
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label
               style={{ color: '#64748b', fontSize: 12, cursor: 'help', borderBottom: '1px dotted #334155', alignSelf: 'flex-start' }}
-              title="Estimated time to print one plate, used by the Schedule page. A G-code's own estimate always wins over this; leave it blank and the schedule falls back to 2 hours, marked as unknown."
+              title="Estimated time to print one plate. A G-code's own estimate always wins over this; leave it blank for no estimate."
             >
               Est. print time
             </label>
@@ -1388,7 +1387,7 @@ export default function Projects() {
         name: newPartName.trim(),
         target_qty: parseInt(newPartQty, 10),
         // Optional: an unparseable value is rejected by the server rather than silently
-        // dropped, so the operator finds out here instead of on the Schedule page.
+        // dropped, so the operator finds out here.
         print_time: newPartTime.trim() || undefined,
       }),
     });
@@ -2008,7 +2007,7 @@ export default function Projects() {
                 // call there is just a harmless no-op refresh.
                 // signalScheduleDirty covers everything routed through this refresh:
                 // quantity edits, G-code uploads and deletions. Each one changes what the
-                // forward schedule would project.
+                // Print Queue shows.
                 onRefresh={() => { fetchDetail(selectedId); fetchProjects(); signalScheduleDirty(); }}
                 onSaved={showToast}
                 onConfirm={confirm}
@@ -2056,7 +2055,7 @@ export default function Projects() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label
               style={{ color: '#64748b', fontSize: 12, cursor: 'help', borderBottom: '1px dotted #334155', alignSelf: 'flex-start' }}
-              title="Optional. Estimated time to print one plate, used to size this part's blocks on the Schedule page. Uploading a sliced file later replaces it with the slicer's own figure. Leave blank to use 2 hours, marked as unknown on the schedule."
+              title="Optional. Estimated time to print one plate. Uploading a sliced file later replaces it with the slicer's own figure."
             >
               Est. print time
             </label>
@@ -2083,7 +2082,7 @@ export default function Projects() {
           </button>
         </div>
         <p style={{ margin: '8px 0 0', fontSize: 11, color: '#475569' }}>
-          The estimate is optional and only shapes the Schedule page. Formats: <span className="mono">2h15m</span>, <span className="mono">90m</span>, <span className="mono">1:30:00</span>.
+          The estimate is optional. Formats: <span className="mono">2h15m</span>, <span className="mono">90m</span>, <span className="mono">1:30:00</span>.
         </p>
         {addPartError && <p style={{ color: '#f87171', fontSize: 12, margin: '6px 0 0' }}>{addPartError}</p>}
       </div>
