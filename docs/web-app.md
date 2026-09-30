@@ -6,6 +6,7 @@ The React single-page application served by Vite. In development, Vite runs on p
 
 - **Dashboard** — TV-optimized command center: fleet utilization, stat cards, printer grid, active project progress, and a needs-attention panel
 - **Fleet page** — live grid of all active printers with status, filterable and searchable
+- **Print Queue page** (under Fleet): open parts in dispatch order, each with its matching printers as tags, or the reason nothing matches
 - **Printers page** — searchable directory of all printers (active and decommissioned); click any row to open the detail view
 - **Printer detail view** — per-machine event timeline, inline note form, printer header
 - **Settings page** — CSV import UI for the printer registry, with flagged-row resolution
@@ -20,6 +21,7 @@ The React single-page application served by Vite. In development, Vite runs on p
 | `client/src/main.jsx` | React root — mounts `<App />` into `#root` |
 | `client/src/App.jsx` | Layout shell, sidebar/topbar nav, `<Routes>` |
 | `client/src/pages/Fleet.jsx` | Live printer grid |
+| `client/src/pages/PrintQueue.jsx` | Print Queue: ordered open parts with matching-printer tags (`/fleet/queue`) |
 | `client/src/pages/Printers.jsx` | Searchable all-printers directory |
 | `client/src/pages/PrinterDetail.jsx` | Per-printer event timeline and note form |
 | `client/src/pages/Decommissioned.jsx` | Decommissioned printer list with notes and recommission |
@@ -46,6 +48,7 @@ The React single-page application served by Vite. In development, Vite runs on p
 │                   │                       │
 │  Dashboard        │                       │
 │  Fleet            │                       │
+│    Print Queue    │                       │
 │  Printers         │                       │
 │  Projects         │                       │
 │  Jobs             │                       │
@@ -58,6 +61,8 @@ The React single-page application served by Vite. In development, Vite runs on p
 **Responsive breakpoint at 600px:** the sidebar is hidden and replaced by a horizontal top nav bar. All page content is still fully accessible on mobile.
 
 Navigation uses `react-router-dom` `<NavLink>` — active links are highlighted in blue (`#1e40af`).
+
+A `NAV_ITEMS` entry with `child: true` is a sub-page, indented under the entry above it in the sidebar (Print Queue under Fleet). Its parent sets `end: true` so only the page actually open is highlighted. The mobile top bar shows sub-pages as ordinary pills.
 
 ## Dashboard Page
 
@@ -301,6 +306,39 @@ Live job queue that polls `GET /api/jobs` every 15 seconds.
 | cancelled | near-black | muted gray |
 
 **"Awaiting Sign-off" badge (display-only):** a row whose `jobs.status` is still `printing` can belong to a printer that is already held for operator confirmation (for example a printer that transitions `PRINTING` -> `IDLE` directly, with no observable `FINISHED`/`STOPPED` in between two polls). `GET /api/jobs` joins `printer_is_held` and `printer_status` for exactly this case; `displayJobStatus()` in Jobs.jsx renders such a row as "Awaiting Sign-off" (green) instead of "Printing" (blue) so the Jobs page agrees with Fleet/Dashboard, which already reflect the hold via `is_held`. The underlying job row is untouched: it still says `printing` until the operator resolves it via Set Ready or Bad Print, at which point it becomes `finished`/`failed` normally.
+
+## Print Queue Page
+
+`client/src/pages/PrintQueue.jsx`, route `/fleet/queue`, listed under Fleet in the sidebar.
+
+Answers "what is waiting to print, and who can print it?" in one list. Each row is an open part
+of an active project, numbered in the order the scheduler considers them (project priority, then
+part order within the project, the same ordering as `server/candidate-query.js`). Data comes from
+`GET /api/parts/queue`, which builds each row from the same per-part rules as the Projects page's
+"Why isn't this printing?" check, so the two never disagree.
+
+**Row layout:** part name, project, and done/target quantity (plus how many are printing) on the
+left; on the right, a tag per matching printer. At the 600 px breakpoint the tags wrap below the
+part. A part-level blocker (the remaining quantity is already printing) shows in amber under the
+part.
+
+**Tags:** one per printer whose model, group, and loaded filament match one of the part's
+G-codes, coloured by where it stands right now: green Ready, blue Busy, amber Awaiting sign-off.
+`NEXT` on a ready tag means that printer would print this part on its next dispatch. Each tag links
+to the printer's detail page, and its tooltip shows the group, loaded filament, G-code, and (for a
+ready printer that has other work first) what it would print instead. A printer holding a live
+job row counts as Busy even before the poller has seen it start, so a just-dispatched printer does
+not show as Ready.
+
+**No match:** a part with no matching printer gets a red border and a list of reasons in place of
+tags: no G-code uploaded, or per G-code, no active printer of that model, none in the allowed
+groups, or none with the required filament loaded. A checkbox filters the list to just these parts.
+
+**Freshness:** same model as the Schedule page, and the same fingerprint. The page polls
+`GET /api/schedule/version` every 5 s and, when it moves, shows a "Recalculating queue" pill and
+refetches; the `scheduleDirty` event triggers the same. A slow 60 s refresh picks up renames,
+which the fingerprint does not hash. Background failures keep the last good list; a failure
+before any data loads shows an inline Retry, and only that Retry toasts.
 
 ## Schedule Page
 

@@ -70,6 +70,7 @@ print-farm-manager/
 │   │   ├── main.jsx      # React root
 │   │   └── pages/
 │   │       ├── Fleet.jsx          # Live printer grid
+│   │       ├── PrintQueue.jsx     # Open parts in dispatch order + matching printers
 │   │       ├── Printers.jsx       # All-printers directory
 │   │       ├── PrinterDetail.jsx  # Per-printer event timeline + notes
 │   │       ├── Decommissioned.jsx # Decommissioned printers + recommission

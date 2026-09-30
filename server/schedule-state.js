@@ -18,6 +18,9 @@
 // the in-progress block, which the client picks up on its own refresh; the fingerprint is
 // for structural change (a job started, an estimate was edited, a part closed).
 //
+// The Print Queue (GET /api/parts/queue) is built from these same inputs and returns this
+// fingerprint too, so a new input to either view belongs in the hash.
+//
 // Rows are limited to active projects because only those can be scheduled. That bounds the
 // scan on a farm with years of completed project history, and a project's own status is
 // part of the hash, so activating one changes the fingerprint and pulls its parts in.
