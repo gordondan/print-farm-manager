@@ -16,13 +16,13 @@ services:
       - cloudflare-tunnel
 
   # Development — hot reload for both server and client, no local Node.js
-  # install required. Behind the `dev` profile so a bare `docker compose up`
+  # install required. Behind the dev profile so a bare docker compose up
   # (production) never starts this. Run it on its own — not alongside
   # production, which would fight over host port 3000 — by naming the service
-  # explicitly: `docker compose up --build print-farm-manager-dev`. Naming a
+  # explicitly: docker compose up --build print-farm-manager-dev. Naming a
   # service starts only that service (and its dependencies), regardless of its
   # profile, instead of "every service enabled for this invocation" the way a
-  # bare `up`/`--profile dev up` with no service name would.
+  # bare up --profile dev up with no service name would.
   print-farm-manager-dev:
     profiles: ["dev"]
     build:
@@ -43,7 +43,7 @@ services:
     volumes:
       - .:/app
       # Shadow the bind mount with the image's own node_modules (installed for
-      # linux/node22 in the `dev` stage) instead of the host's — a host
+      # linux/node22 in the dev stage) instead of the host's — a host
       # node_modules here would either be missing or built for the wrong
       # platform/ABI (e.g. better-sqlite3 compiled for macOS/Windows).
       - /app/node_modules
@@ -61,3 +61,4 @@ networks:
   default:
   cloudflare-tunnel:
     external: true
+    
