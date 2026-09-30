@@ -16,7 +16,7 @@ wall so pulling upstream updates stays a clean rebase.
    React components must sit inside Vite's root, so client-side garden code
    lives in `client/src/garden/` (new files only, nothing upstream there).
 2. **Upstream files get hooks, not features.** The complete list of upstream
-   files the `garden` branch touches — keep it this short:
+   files the `development` branch touches — keep it this short:
 
    | File | Hook |
    |---|---|
@@ -26,7 +26,7 @@ wall so pulling upstream updates stays a clean rebase.
    | `client/src/pages/Fleet.jsx` | imports `../garden/NextJobLine` and renders `<NextJobLine printerId={printer.id} />` as the last child of `PrinterCard` |
    | `docker-compose.yml` | joins the external `cloudflare-tunnel` network (deploy config) |
 
-   Check it any time: `git diff --stat origin/main...garden -- . ':!garden'`
+   Check it any time: `git diff --stat origin/main...development -- . ':!garden'`
    should list only upstream fixes, these five files, and `client/src/garden/`.
 3. **Garden URLs live under `/garden`.** The server never mounts anything
    outside that prefix, so a future upstream route can't collide.
@@ -38,13 +38,13 @@ wall so pulling upstream updates stays a clean rebase.
 ```
 origin/main (Joel)
   └─ local/all-fixes-on-main   your fixes pending upstream
-       └─ garden               hooks + this folder  ← deployed
+       └─ development          hooks + this folder  ← deployed
 ```
 
 ## Taking Joel's updates
 
 ```bash
-cd ~/projects/print-garden          # the deploy worktree, on branch garden
+cd ~/projects/print-garden          # the deploy worktree, on branch development
 git fetch origin
 git rebase origin/main              # replays your pending fixes, then the garden commits
 ```
