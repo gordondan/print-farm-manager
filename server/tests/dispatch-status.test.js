@@ -41,7 +41,7 @@ beforeEach(() => {
     );
     CREATE TABLE jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      part_id INTEGER NOT NULL, status TEXT DEFAULT 'queued', parts_per_plate INTEGER NOT NULL
+      part_id INTEGER NOT NULL, printer_id INTEGER, status TEXT DEFAULT 'queued', parts_per_plate INTEGER NOT NULL
     );
   `);
 

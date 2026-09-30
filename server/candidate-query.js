@@ -18,7 +18,8 @@
 // query, which is what keeps this refactor behaviour-neutral for dispatch.
 //
 // GET /api/parts/:id/dispatch-status in routes/parts.js mirrors these same rules in JS to
-// explain them one part at a time; if the rules here change, that mirror changes with them.
+// explain them one part at a time, and GET /api/parts/queue reuses that mirror plus this
+// ORDER BY to list the whole queue; if the rules here change, both change with them.
 
 // Bind order for every query built here: printer model, printer group, loaded material,
 // loaded color, then one parameter per excluded part id.

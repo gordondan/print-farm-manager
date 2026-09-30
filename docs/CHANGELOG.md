@@ -2,6 +2,26 @@
 
 ---
 
+## 2026-09-30: Print Queue page under Fleet
+
+The dispatch check on the Projects page explains one part at a time, and the Schedule page shows time rather than eligibility. Neither answers the question an operator asks walking the floor: "what is waiting, in what order, and which printers can take it?" The new Print Queue page (sidebar, indented under Fleet, at `/fleet/queue`) lists every open part of every active project in the scheduler's own order, with a tag for each printer that matches the part (model, group, loaded filament) coloured by whether it is ready, busy, or awaiting sign-off. `NEXT` marks a ready printer that would print this part on its next dispatch. A part with no matching printer shows why instead: no G-code, no active printer of that model, none in the allowed groups, or none with the required filament loaded.
+
+**One set of rules.** The per-part logic behind `GET /api/parts/:id/dispatch-status` moved into a shared `diagnosePart` in `server/routes/parts.js`, and the new `GET /api/parts/queue` calls it for every queued part, so the queue and the dispatch check cannot disagree. Each request computes "what would this printer print next" once per printer rather than once per part.
+
+**One behaviour change to the dispatch check.** A printer holding an `uploading` or `printing` job row now counts as busy even while its last polled status still says IDLE or FINISHED. The scheduler already refuses to dispatch to such a printer (it checks the job row before reserving), so the check was briefly calling a just-dispatched printer ready when it was not. Matching printers still come from the same model, group, and filament rules.
+
+**Freshness.** The queue is built from the same inputs as the forward schedule, so it reuses the schedule fingerprint: the response carries `version`, and the page polls `GET /api/schedule/version` every 5 s and shows "Recalculating queue" when it moves, rather than waiting on a 15 s timer.
+
+Read-only: nothing here writes to the database, dispatches, touches holds, or changes any path that credits `completed_qty`. Verified by the test suite and against a client build; not yet exercised on the production farm.
+
+### Changes
+- `server/routes/parts.js`: `diagnosePart` and a per-request context (active-job printer set, cached next-up per printer) shared by `dispatch-status` and the new `GET /queue`, declared above `/:id`; printer objects gain `model`, G-code entries gain `mismatch`; blocker strings reworded without dashes.
+- `client/src/pages/PrintQueue.jsx` (new): the Print Queue page.
+- `client/src/App.jsx`: `/fleet/queue` route; sidebar sub-item support (`child: true`), with Fleet set to `end` so only the open page highlights.
+- `server/tests/print-queue.test.js` (new, 9 tests): route not shadowed by `/:id`, selection and ordering, match states, job-row busy, each no-match reason, blocker, version change.
+- `server/tests/dispatch-status.test.js`: inline `jobs` schema gained `printer_id`, which the busy check reads.
+- `docs/api.md`, `docs/web-app.md`, `docs/README.md`: documented the endpoint, the response additions, the page, and the nav sub-item.
+
 ## 2026-09-29: Filament and targeting edits dispatch immediately; the dispatch check shows which printer matches
 
 Reported on the farm: a project and a printer were both set to PETG, the part's "Why isn't this printing?" check said it was ready and that a matching printer would pick it up, and nothing printed. There was also no way to tell from the check which printer it meant.
