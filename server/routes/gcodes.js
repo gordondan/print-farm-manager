@@ -225,6 +225,14 @@ module.exports = (db, scheduler = null) => {
     db.prepare('UPDATE gcodes SET est_print_secs = ?, material_grams = ?, allowed_groups = ?, required_material = ?, required_color = ? WHERE id = ?')
       .run(estPrintSecs, materialGrams, allowedGroups, requiredMaterial, requiredColor, req.params.id);
 
+    // Loosening a G-code's group or filament targeting can make an already-idle printer a
+    // match, and idle printers never re-ask on their own, so sweep when targeting changed.
+    const targetingChanged =
+      allowedGroups    !== gcode.allowed_groups ||
+      requiredMaterial !== gcode.required_material ||
+      requiredColor    !== gcode.required_color;
+    if (targetingChanged && scheduler) scheduler.sweepIdlePrinters();
+
     res.json(db.prepare('SELECT * FROM gcodes WHERE id = ?').get(req.params.id));
   });
 

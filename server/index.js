@@ -20,7 +20,6 @@ const notifications  = require('./notifications');
 const events         = require('./events');
 const backup         = require('./backup');
 
-const printersRouter     = require('./routes/printers')(db);
 const jobsRouter         = require('./routes/jobs')(db);
 const backupRouter       = require('./routes/backup')(db);
 const dashboardRouter    = require('./routes/dashboard')(db);
@@ -37,7 +36,6 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // API routes
-app.use('/api/printers',        printersRouter);
 app.use('/api/printers/:id/jobs', printerJobsRouter);
 app.use('/api/jobs',            jobsRouter);
 app.use('/api/backup',          backupRouter);
@@ -88,10 +86,12 @@ const server = app.listen(PORT, () => {
   const poller    = new PrinterPoller(db);
   const scheduler = new JobScheduler(db, poller);
 
-  // Mount projects, parts, and gcodes routers here so they have access to the
-  // scheduler: projects for complete/reactivate, parts for the sweep after adding a
-  // part (or raising target_qty) reactivates a completed project, gcodes for the sweep
-  // after an upload gives a part its first matching G-code.
+  // Mount printers, projects, parts, and gcodes routers here so they have access to the
+  // scheduler: printers for the sweep after a filament, group, or model edit makes an
+  // idle printer eligible, projects for complete/reactivate and targeting edits, parts
+  // for the sweep after adding a part (or raising target_qty) reactivates a completed
+  // project, gcodes for the sweep after an upload or a targeting edit.
+  app.use('/api/printers', require('./routes/printers')(db, scheduler));
   app.use('/api/projects', require('./routes/projects')(db, scheduler));
   app.use('/api/parts',    require('./routes/parts')(db, scheduler));
   app.use('/api/gcodes',   require('./routes/gcodes')(db, scheduler));
