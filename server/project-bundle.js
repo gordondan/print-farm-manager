@@ -141,7 +141,10 @@ function validateBundle(db, archive) {
   return { manifest, failures };
 }
 
-function importProjectBundle(db, archivePath, { projectsDir = PROJECTS_DIR, gcodeDir = GCODE_DIR } = {}) {
+function importProjectBundle(db, archivePath, { idempotencyKey = null, projectsDir = PROJECTS_DIR, gcodeDir = GCODE_DIR } = {}) {
+  if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 200 || /[\u0000-\u001f]/.test(idempotencyKey))) {
+    throw invalid('Idempotency-Key must be a non-empty string of at most 200 safe characters');
+  }
   let archive;
   try {
     archive = fs.readFileSync(archivePath);
@@ -175,12 +178,21 @@ function importProjectBundle(db, archivePath, { projectsDir = PROJECTS_DIR, gcod
 
     let project;
     const importedParts = [];
+    let alreadyImported = false;
     db.transaction(() => {
+      if (idempotencyKey) {
+        project = db.prepare('SELECT * FROM projects WHERE bundle_import_key = ?').get(idempotencyKey);
+        if (project) {
+          alreadyImported = true;
+          importedParts.push(...db.prepare('SELECT * FROM parts WHERE project_id = ? ORDER BY sort_order, id').all(project.id));
+          return;
+        }
+      }
       const now = Date.now();
       const result = db.prepare(`
-        INSERT INTO projects (name, import_failures, status, priority, created_at, updated_at)
-        VALUES (?, ?, 'draft', 0, ?, ?)
-      `).run(manifest.project_name.trim(), JSON.stringify(failures), now, now);
+        INSERT INTO projects (name, import_failures, bundle_import_key, status, priority, created_at, updated_at)
+        VALUES (?, ?, ?, 'draft', 0, ?, ?)
+      `).run(manifest.project_name.trim(), JSON.stringify(failures), idempotencyKey, now, now);
       const projectId = result.lastInsertRowid;
       managedProjectDir = path.join(projectsDir, String(projectId));
       fs.mkdirSync(projectsDir, { recursive: true });
@@ -212,7 +224,12 @@ function importProjectBundle(db, archivePath, { projectsDir = PROJECTS_DIR, gcod
       }
       project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
     })();
-    return { project, parts: importedParts, failures };
+    if (alreadyImported) {
+      let existingFailures = [];
+      try { existingFailures = JSON.parse(project.import_failures || '[]'); } catch (_) {}
+      return { project, parts: importedParts, failures: existingFailures, reused: true };
+    }
+    return { project, parts: importedParts, failures, reused: false };
   } catch (error) {
     for (const file of createdFiles) fs.rmSync(file, { force: true });
     if (managedProjectDir) fs.rmSync(managedProjectDir, { recursive: true, force: true });

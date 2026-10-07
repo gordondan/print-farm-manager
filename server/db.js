@@ -112,6 +112,8 @@ try { db.exec('ALTER TABLE projects ADD COLUMN required_material TEXT'); } catch
 try { db.exec('ALTER TABLE projects ADD COLUMN required_color TEXT'); } catch (_) {}
 try { db.exec('ALTER TABLE projects ADD COLUMN allowed_groups TEXT'); } catch (_) {}
 try { db.exec('ALTER TABLE projects ADD COLUMN import_failures TEXT'); } catch (_) {}
+try { db.exec('ALTER TABLE projects ADD COLUMN bundle_import_key TEXT'); } catch (_) {}
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_bundle_import_key ON projects(bundle_import_key) WHERE bundle_import_key IS NOT NULL'); } catch (_) {}
 
 // Printer models — source of truth for which models this farm supports.
 // New installs start empty; operator adds models in Settings.

@@ -11,6 +11,7 @@ import Schedule from './pages/Schedule';
 import PrintQueue from './pages/PrintQueue';
 import Settings from './pages/Settings';
 import Decommissioned from './pages/Decommissioned';
+import BatchSlice from './garden/BatchSlice';
 
 const NAV_ITEMS = [
   { to: '/',               label: 'Dashboard' },
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { to: '/schedule',       label: 'Schedule' },
   { to: '/decommissioned', label: 'Decommissioned' },
   { to: '/labels',         label: 'Labels' }, // garden plot, see garden/README.md
+  { to: '/batch-slice',    label: 'Batch Slice', child: true },
   { to: '/settings',       label: 'Settings' },
 ];
 
@@ -131,6 +133,7 @@ export default function App() {
             <Route path="/decommissioned"  element={<Decommissioned />} />
             <Route path="/settings"        element={<Settings />} />
             <Route path="/labels"          element={<iframe src="/garden/labels/?embed" title="Labels" style={{ border: 0, width: '100%', height: 'calc(100vh - 48px)', display: 'block' }} />} />
+            <Route path="/batch-slice"     element={<BatchSlice />} />
           </Routes>
         </main>
       </div>

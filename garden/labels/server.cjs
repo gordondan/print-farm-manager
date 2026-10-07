@@ -1,8 +1,8 @@
-// Label job queue — the server half of "Send to Print Garden".
+// Label job queue, the server half of "Send to Print Garden".
 //
 // The browser posts one pre-packed, single-colour STL per plate; the Mac-side
-// worker (worker/label_worker.py) claims jobs, slices each plate with the
-// add-to-printgarden helper, and reports progress back here. The queue lives
+// worker (../slicer/worker.py) claims jobs, slices each plate with the
+// repository-owned Print Garden helper, and reports progress back here. The queue lives
 // in plain files under its own data directory: it never touches farm.db, so
 // the garden adds no schema to Joel's database.
 //
@@ -49,6 +49,16 @@ module.exports = function labelJobs(dataDir) {
     }
     return read(req.params.id);
   };
+  const workerOnly = (req, res, next) => {
+    const configured = process.env.PRINTGARDEN_WORKER_TOKEN;
+    if (!configured) return res.status(503).json({ error: 'Worker token is not configured' });
+    const supplied = Buffer.from(req.get('authorization') || '');
+    const expected = Buffer.from(`Bearer ${configured}`);
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      return res.status(401).json({ error: 'Worker authentication required' });
+    }
+    next();
+  };
   const dropPlates = (job) => {
     for (const p of job.plates) fs.rmSync(path.join(jobDir(job.id), p.file), { force: true });
   };
@@ -60,6 +70,11 @@ module.exports = function labelJobs(dataDir) {
   };
 
   router.get('/health', (_req, res) => {
+    res.json({ ok: true, worker_seen_at: workerSeenAt });
+  });
+
+  router.post('/worker/heartbeat', workerOnly, (_req, res) => {
+    workerSeenAt = new Date().toISOString();
     res.json({ ok: true, worker_seen_at: workerSeenAt });
   });
 
@@ -111,7 +126,7 @@ module.exports = function labelJobs(dataDir) {
   });
 
   // Worker → queue: take the oldest queued job (or one whose worker died).
-  router.post('/jobs/claim', (_req, res) => {
+  router.post('/jobs/claim', workerOnly, (_req, res) => {
     workerSeenAt = new Date().toISOString();
     const now = Date.now();
     const job = allJobs().find((j) => j.status === 'queued'
@@ -124,7 +139,7 @@ module.exports = function labelJobs(dataDir) {
     res.json(job);
   });
 
-  router.get('/jobs/:id/plates/:n', (req, res) => {
+  router.get('/jobs/:id/plates/:n', workerOnly, (req, res) => {
     const job = withJob(req, res);
     if (!job) return;
     const plate = job.plates[Number(req.params.n) - 1];
@@ -134,7 +149,7 @@ module.exports = function labelJobs(dataDir) {
   });
 
   // Worker → queue: progress, and the final done/failed verdict.
-  router.post('/jobs/:id/progress', (req, res) => {
+  router.post('/jobs/:id/progress', workerOnly, (req, res) => {
     const job = withJob(req, res);
     if (!job) return;
     if (job.status !== 'slicing') return res.status(409).json({ error: `Job is ${job.status}, not slicing` });

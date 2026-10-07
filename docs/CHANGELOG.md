@@ -2,6 +2,25 @@
 
 ---
 
+## 2026-10-07: Batch Slice in Print Garden
+
+Batch Slicer is integrated into Print Garden as a page under Labels. The
+page manages printer profiles and submits browser uploads or Mac folders
+approved by the worker. A shared Mac worker runs both Batch Slice and the
+existing Labels queue, reports progress and failures, supports cancellation,
+and imports completed or partial batches as draft projects. Worker routes use
+the shared worker token. The implementation is not yet installed on the
+production farm or validated against its OrcaSlicer presets.
+
+### Changes
+- `garden/batch_slice/`: Python Orca slicing engine and project bundle writer maintained inside Print Garden.
+- `garden/batch-slice/server.cjs`: persistent job queue, upload validation, profile storage, worker heartbeat and capabilities, cancellation, and job history.
+- `garden/slicer/`: shared worker, Labels compatibility processing, and integrated project import helper.
+- `garden/labels/worker/install.sh`: installs the shared Mac launchd worker and replaces the label-only launch agent.
+- `client/src/garden/BatchSlice.jsx` and `client/src/App.jsx`: Batch Slice page, profiles, uploads, approved folders, progress, and navigation.
+- `server/project-bundle.js`, `server/routes/project-bundles.js`, and `server/db.js`: idempotent project bundle import keys for worker retries.
+- `docker-compose.yml`, `garden/README.md`, and `docs/api.md`: worker configuration and API documentation.
+
 ## 2026-09-30: Print Queue page under Fleet
 
 The dispatch check on the Projects page explains one part at a time, and the Schedule page shows time rather than eligibility. Neither answers the question an operator asks walking the floor: "what is waiting, in what order, and which printers can take it?" The new Print Queue page (sidebar, indented under Fleet, at `/fleet/queue`) lists every open part of every active project in the scheduler's own order, with a tag for each printer that matches the part (model, group, loaded filament) coloured by whether it is ready, busy, or awaiting sign-off. `NEXT` marks a ready printer that would print this part on its next dispatch. A part with no matching printer shows why instead: no G-code, no active printer of that model, none in the allowed groups, or none with the required filament loaded.

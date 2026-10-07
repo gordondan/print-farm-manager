@@ -7,6 +7,7 @@ wall so pulling upstream updates stays a clean rebase.
 | Plot | URL | What |
 |---|---|---|
 | `labels/` | `/labels` (in the app shell), `/garden/labels/` (standalone), `/garden/api/labels` (job queue) | Multibin label generator → STL / 3MF, or **Send to Print Garden** (slice + queue) |
+| `batch-slice/` | `/batch-slice`, `/garden/api/batch-slice` | Browser uploads or approved Mac folders, Print Garden managed Orca profiles, progress and draft project import |
 | `fleet/` | "Next:" line on each Fleet card, `/garden/api/fleet/next-jobs` | Read-only preview of what each printer would be dispatched next. Mirrors the scheduler's candidate walk; its test compares against `_reserveJob`, so run it after every rebase. |
 
 ## The wall
@@ -68,12 +69,24 @@ Roll back to the pre-garden build: `docker tag print-farm-manager:pre-garden pri
 
 ## Mac-side services
 
-Some garden work can't run in the Linux container. The label slicing worker
-(`labels/worker/`) runs on the farm host as a launchd agent, because slicing
-uses the Mac's OrcaSlicer and Batch Slicer presets through the
-add-to-printgarden helper. Install or reinstall it with
-`garden/labels/worker/install.sh`. It logs to
-`~/Library/Logs/garden-label-worker.log`.
+Some garden work can't run in the Linux container. The shared Labels and Batch
+Slice worker (`slicer/worker.py`) runs on the Mac as a launchd agent because
+OrcaSlicer and its preset files stay on the worker. Install or reinstall it
+with `garden/labels/worker/install.sh`. It logs to
+`~/Library/Logs/garden-slicer-worker.log`.
+
+Set the same `PRINTGARDEN_WORKER_TOKEN` in the Print Garden deployment `.env`
+and in the shell before installing the launchd agent. Also set
+`ORCA_PRESET_ROOTS` to one or more colon-separated Orca preset directories and
+`PRINTGARDEN_SOURCE_ROOTS` to the Mac folders users may batch-slice. Set
+`ORCA_PATH` only when OrcaSlicer is not discoverable in its standard app or
+command locations. These values are copied into the LaunchAgent plist.
+
+Profiles are managed under **Batch Slice** in the app. Select registered
+Print Garden printer model IDs and presets reported by the worker. Preset paths
+stay on the Mac; the browser sees stable preset IDs and display names. Batch
+jobs and uploads are persisted in the existing `farm-data` volume under
+`server/data/garden/batch-slice`; no queue tables are added to `farm.db`.
 
 ## Tests
 

@@ -22,6 +22,11 @@ module.exports = function mountGarden(app) {
   garden.use('/api/labels', require('./labels/server.cjs')(
     process.env.GARDEN_LABELS_DIR || path.join(__dirname, '..', 'server', 'data', 'garden', 'labels')));
 
+  // Batch Slice profiles and staged jobs share the garden data volume, not farm.db.
+  garden.use('/api/batch-slice', require('./batch-slice/server.cjs')(
+    require('../server/db'),
+    process.env.GARDEN_BATCH_SLICE_DIR || path.join(__dirname, '..', 'server', 'data', 'garden', 'batch-slice')));
+
   // Fleet card "Next:" line: read-only preview of what each printer dispatches next.
   // server/db.js is the process-wide singleton, so this is the same connection
   // server/index.js uses.

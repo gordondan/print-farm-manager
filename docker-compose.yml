@@ -8,6 +8,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      PRINTGARDEN_WORKER_TOKEN: ${PRINTGARDEN_WORKER_TOKEN:-}
     volumes:
       - farm-data:/app/server/data
       - farm-gcode:/app/server/gcode
@@ -33,6 +35,7 @@ services:
       - "3000:3000"   # API server
       - "5173:5173"   # Vite dev server (hot reload) — open this one in a browser
     environment:
+      - PRINTGARDEN_WORKER_TOKEN=${PRINTGARDEN_WORKER_TOKEN:-}
       # Vite's file watcher can miss change events over Docker Desktop's
       # bind-mount filesystem on macOS/Windows (virtiofs / gRPC-FUSE) — polling
       # is slightly more CPU but reliable on every host OS.
@@ -61,4 +64,3 @@ networks:
   default:
   cloudflare-tunnel:
     external: true
-    

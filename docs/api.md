@@ -921,3 +921,76 @@ Each table's restore INSERT covers the columns the *live* schema currently has (
 }
 ```
 | `500` | Unhandled server error |
+
+## Garden Batch Slice
+
+The Batch Slice page and browser routes are under the same application access policy as Print Garden. Mac worker routes require `Authorization: Bearer <PRINTGARDEN_WORKER_TOKEN>`.
+
+### `GET /garden/api/batch-slice/status`
+
+Returns worker availability, approved folder choices as stable IDs and display names, and preset IDs and display names. It does not return local filesystem paths.
+
+```json
+{
+  "online": true,
+  "worker_seen_at": "2026-10-07T15:00:00.000Z",
+  "orca_available": true,
+  "source_folders": [{ "id": "ab12cd34ef56ab78cd90", "name": "Models/Brackets" }],
+  "presets": [{ "id": "cd34ef56ab78cd90ab12", "kind": "machine", "label": "Bambu Lab P1S 0.4 nozzle" }]
+}
+```
+
+### `GET /garden/api/batch-slice/profiles`
+
+Returns profiles stored in the garden data directory. Preset fields contain worker-issued stable IDs, not local paths.
+
+### `PUT /garden/api/batch-slice/profiles`
+
+Replaces the profile list. Each profile requires a safe `key`, registered `printer_model_id`, `machine`, `process`, and a non-empty `filaments` ID list. Optional `extra` is an argument list, never a shell command. `enabled` defaults to `true`.
+
+```json
+{
+  "profiles": [{
+    "key": "p1s-pla",
+    "printer_model_id": "p1s",
+    "machine": "cd34ef56ab78cd90ab12",
+    "process": "de45fa67bc89de01fa23",
+    "filaments": ["ef56ab78cd90ab12cd34"],
+    "extra": [],
+    "enabled": true
+  }]
+}
+```
+
+Returns the saved profile list. Unknown printer model IDs and malformed profiles return `400`.
+
+### `POST /garden/api/batch-slice/jobs`
+
+Creates a queued batch and returns `201` with the job. Use `multipart/form-data`: `meta` is JSON, `files` contains model files for upload mode, and `file_paths` is a JSON array of safe relative paths aligned by file order. Supported model extensions are STL, 3MF, OBJ, STEP, and STP. Uploads are bounded by `GARDEN_BATCH_SLICE_MAX_FILES`, `GARDEN_BATCH_SLICE_MAX_FILE_BYTES`, and `GARDEN_BATCH_SLICE_MAX_TOTAL_BYTES`.
+
+```json
+{
+  "project_name": "Bracket batch",
+  "source_mode": "upload",
+  "profile_keys": ["p1s-pla"],
+  "options": { "jobs": 2, "arrange": true, "recursive": false, "dry_run": false }
+}
+```
+
+For Mac folder mode, use `source_mode: "folder"` and `source_folder_id` from `GET /status`. The worker resolves the folder ID beneath configured source roots. Invalid paths, unsupported types, duplicate relative paths, missing profiles, and configured size-limit violations return `400` before queueing. `POST /jobs/:id/cancel` cancels a queued batch immediately or signals the worker to stop an active Orca process.
+
+### Job history and worker routes
+
+- `GET /garden/api/batch-slice/jobs` and `GET /garden/api/batch-slice/jobs/:id` return recent summaries and job progress.
+- `POST /garden/api/batch-slice/worker/heartbeat` accepts worker capabilities.
+- `GET /garden/api/batch-slice/worker/config` returns the web-managed profiles. Source and preset roots stay in the worker environment.
+- `POST /garden/api/batch-slice/jobs/claim` claims queued or stale work.
+- `GET /garden/api/batch-slice/jobs/:id/files/:index` streams an uploaded model to the worker.
+- `GET /garden/api/batch-slice/worker/jobs/:id` returns cancellation and claim state.
+- `POST /garden/api/batch-slice/jobs/:id/progress` accepts status, progress, results, and bounded logs from the current worker lease.
+
+All worker routes require the worker token. Queue data and staged uploads are stored under `GARDEN_BATCH_SLICE_DIR` or `server/data/garden/batch-slice` on the persistent data volume. Completed uploads are removed while up to 50 job summaries remain available.
+
+### `POST /api/project-bundles/import`
+
+Accepts an optional `Idempotency-Key` header. Repeating a successful request with the same key returns the existing project (`200`) instead of creating another project. A new import returns `201`. Batch Slice uses `batch-slice:<job-id>` so a worker restart after import does not duplicate a draft project.

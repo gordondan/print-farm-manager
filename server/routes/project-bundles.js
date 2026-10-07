@@ -24,8 +24,12 @@ module.exports = (db, { uploadDir = path.join(os.tmpdir(), 'print-farm-manager-i
       if (uploadError) return res.status(400).json({ error: uploadError.message });
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
       try {
-        const imported = importProjectBundle(db, req.file.path, { projectsDir, gcodeDir });
-        res.status(201).json(imported);
+        const imported = importProjectBundle(db, req.file.path, {
+          idempotencyKey: req.get('Idempotency-Key') || null,
+          projectsDir,
+          gcodeDir,
+        });
+        res.status(imported.reused ? 200 : 201).json(imported);
       } catch (error) {
         res.status(400).json({ error: error.message || 'Could not import project bundle' });
       } finally {

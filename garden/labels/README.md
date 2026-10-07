@@ -14,17 +14,18 @@ build step: three.js, opentype.js, fflate and the Arimo font are vendored in
 
 ```
 browser ──plates──▶ /garden/api/labels (server.cjs, queue on disk)
-                          ▲  claim / progress
+                          ▲  claim / progress / shared heartbeat
                           │
-            Mac: worker/label_worker.py ──▶ add-to-printgarden helper
-                                              (BatchSlicer + OrcaSlicer)
+            Mac: ../slicer/worker.py ──▶ repository-owned helper
+                                              (Print Garden engine + OrcaSlicer)
                                               ──▶ Print Garden API
 ```
 
 - **Plates:** the batch is packed onto P1S-size plates (256 mm, the smallest
   bed; see `lib/plates.js`), with each label kit whole on one plate. The page
   uploads one single-color STL per plate.
-- **Worker:** claims the job and runs the helper once per plate. Plate 1
+- **Worker:** the shared slicer agent claims Labels and Batch Slice work in
+  turn, using one worker token. It runs the helper once per plate. Plate 1
   creates the project as a draft, and later plates join it by id with their
   own `--parts-per-plate`.
 - **Activation:** the project is activated only if every plate loaded;
@@ -38,9 +39,10 @@ browser ──plates──▶ /garden/api/labels (server.cjs, queue on disk)
   checked in for a minute. A job claimed by a worker that died is handed out
   again after 30 minutes.
 
-Install the worker: `worker/install.sh` (a launchd agent in your login
-session). Run it by hand against another instance with
-`PRINTGARDEN_URL=http://localhost:3099 python3 worker/label_worker.py --once`.
+Install the shared worker: `worker/install.sh` (a launchd agent in your login
+session). Configure its token, Orca preset roots, and approved source roots as
+described in [garden/README.md](../README.md). Run it by hand against another
+instance with `PRINTGARDEN_URL=http://localhost:3099 python3 ../slicer/worker.py --once`.
 
 ## Outputs
 
