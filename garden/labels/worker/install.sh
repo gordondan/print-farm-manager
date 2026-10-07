@@ -41,6 +41,7 @@ cat > "$PLIST" <<EOF
   <dict>
     <key>PATH</key><string>$(xml_escape "$(dirname "$PY"):/usr/bin:/bin:/usr/sbin:/sbin")</string>
     <key>PYTHONUNBUFFERED</key><string>1</string>
+    <key>PYTHONDONTWRITEBYTECODE</key><string>1</string>
     <key>PRINTGARDEN_URL</key><string>$(xml_escape "${PRINTGARDEN_URL:-http://localhost:3000}")</string>
     <key>PRINTGARDEN_WORKER_TOKEN</key><string>$(xml_escape "$PRINTGARDEN_WORKER_TOKEN")</string>
     <key>PRINTGARDEN_SOURCE_ROOTS</key><string>$(xml_escape "${PRINTGARDEN_SOURCE_ROOTS:-}")</string>
