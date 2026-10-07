@@ -23,8 +23,8 @@ const NAV_ITEMS = [
   { to: '/jobs',           label: 'Jobs' },
   { to: '/schedule',       label: 'Schedule' },
   { to: '/decommissioned', label: 'Decommissioned' },
+  { to: '/batch-slice',    label: 'Batch Slice' },
   { to: '/labels',         label: 'Labels' }, // garden plot, see garden/README.md
-  { to: '/batch-slice',    label: 'Batch Slice', child: true },
   { to: '/settings',       label: 'Settings' },
 ];
 
