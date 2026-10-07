@@ -104,6 +104,7 @@ def folder_inventory(roots: list[Path]) -> tuple[list[dict[str, str]], dict[str,
     for root_index, root in enumerate(roots):
         if not root.is_dir():
             continue
+        root_label = f"{root.parent.name}/{root.name}"
         candidates = {root}
         try:
             for model in root.rglob("*"):
@@ -124,7 +125,7 @@ def folder_inventory(roots: list[Path]) -> tuple[list[dict[str, str]], dict[str,
             except (OSError, ValueError):
                 continue
             relative = resolved.relative_to(root).as_posix()
-            name = root.name if relative == "." else f"{root.name}/{relative}"
+            name = root_label if relative == "." else f"{root_label}/{relative}"
             public.append({"id": stable_id, "name": name})
             private[stable_id] = resolved
     public.sort(key=lambda item: (item["name"].count("/"), item["name"].casefold()))
