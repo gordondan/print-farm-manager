@@ -19,6 +19,27 @@ function invalid(message) {
   return error;
 }
 
+function movePathSync(source, destination) {
+  try {
+    fs.renameSync(source, destination);
+    return;
+  } catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+  }
+
+  try {
+    if (fs.statSync(source).isDirectory()) {
+      fs.cpSync(source, destination, { recursive: true, errorOnExist: true, force: false });
+    } else {
+      fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+    }
+    fs.rmSync(source, { recursive: true, force: true });
+  } catch (error) {
+    fs.rmSync(destination, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 function safeRelativePath(value, label) {
   if (typeof value !== 'string' || !value || value.includes('\\')) {
     throw invalid(`${label} must be a safe relative path`);
@@ -197,7 +218,7 @@ function importProjectBundle(db, archivePath, { idempotencyKey = null, projectsD
       managedProjectDir = path.join(projectsDir, String(projectId));
       fs.mkdirSync(projectsDir, { recursive: true });
       fs.mkdirSync(managedProjectDir, { recursive: true });
-      fs.renameSync(path.join(stagingDir, 'originals'), path.join(managedProjectDir, 'originals'));
+      movePathSync(path.join(stagingDir, 'originals'), path.join(managedProjectDir, 'originals'));
 
       for (const part of manifest.parts) {
         const sourcePath = path.join(managedProjectDir, 'originals', ...part.source_relpath.split('/'));
@@ -213,7 +234,7 @@ function importProjectBundle(db, archivePath, { idempotencyKey = null, projectsD
           const managedName = `${projectId}-${partId}-${index}-${slice.filename}`;
           const managedPath = path.join(gcodeDir, managedName);
           fs.mkdirSync(gcodeDir, { recursive: true });
-          fs.renameSync(slice._stagedPath, managedPath);
+          movePathSync(slice._stagedPath, managedPath);
           createdFiles.push(managedPath);
           db.prepare(`
             INSERT INTO gcodes (part_id, printer_model, filename, filepath, parts_per_plate, est_print_secs, material_grams, created_at)

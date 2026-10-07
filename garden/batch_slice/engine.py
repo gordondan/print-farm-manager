@@ -355,6 +355,7 @@ class _SliceRunner:
         try:
             process = subprocess.Popen(
                 command,
+                cwd=outdir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
