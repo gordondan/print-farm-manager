@@ -8,6 +8,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 WORKER=$(cd "$HERE/../../slicer" && pwd)/worker.py
 PY=$(command -v python3)
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+OLD_PLIST="$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
 LOG="$HOME/Library/Logs/garden-slicer-worker.log"
 
 if [ -z "${PRINTGARDEN_WORKER_TOKEN:-}" ]; then
@@ -59,6 +60,7 @@ cat > "$PLIST" <<EOF
 EOF
 
 launchctl bootout "gui/$(id -u)/$OLD_LABEL" 2>/dev/null || true
+rm -f "$OLD_PLIST"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "installed $LABEL -> $WORKER (log: $LOG)"
