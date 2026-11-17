@@ -25,6 +25,7 @@ const NAV_ITEMS = [
   { to: '/decommissioned', label: 'Decommissioned' },
   { to: '/batch-slice',    label: 'Batch Slice' },
   { to: '/labels',         label: 'Labels' }, // garden plot, see garden/README.md
+  { to: '/dupont',         label: 'Dupont Clips' }, // garden plot, see garden/README.md
   { to: '/settings',       label: 'Settings' },
 ];
 
@@ -132,6 +133,7 @@ export default function App() {
             <Route path="/schedule"        element={<Schedule />} />
             <Route path="/decommissioned"  element={<Decommissioned />} />
             <Route path="/settings"        element={<Settings />} />
+            <Route path="/dupont"          element={<iframe src="/garden/dupont/?embed" title="Dupont Clips" style={{ border: 0, width: '100%', height: 'calc(100vh - 48px)', display: 'block' }} />} />
             <Route path="/labels"          element={<iframe src="/garden/labels/?embed" title="Labels" style={{ border: 0, width: '100%', height: 'calc(100vh - 48px)', display: 'block' }} />} />
             <Route path="/batch-slice"     element={<BatchSlice />} />
           </Routes>

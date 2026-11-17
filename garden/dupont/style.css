@@ -1,0 +1,50 @@
+/* Builds on ../labels/style.css (shared palette, inputs, buttons, viewer). */
+
+.app { grid-template-columns: 340px minmax(320px, 1fr) minmax(320px, 1fr); }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn-row button { flex: 1 1 auto; }
+
+.pattern { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.pattern span { width: 40px; color: var(--muted); }
+.pattern code { font: 13px ui-monospace, Menlo, monospace; letter-spacing: .08em; word-break: break-all; }
+
+.fields { display: flex; flex-direction: column; gap: 8px; }
+.fields label.inline { justify-content: space-between; }
+.fields .seg button { font-size: 12px; padding: 6px 4px; }
+
+.pin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pin-table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; padding: 2px 4px; }
+.pin-table td { padding: 2px; }
+.pin-table td:first-child { color: var(--muted); width: 24px; text-align: right; padding-right: 6px; }
+.pin-table input { padding: 4px 6px; font-size: 13px; }
+.pin-table input.on { border-color: #2f9e5b; }
+
+.problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.problems li { font-size: 12px; border-radius: 6px; padding: 7px 9px; border: 1px solid var(--line); }
+.problems li.error { color: #d0423a; border-color: #d0423a; }
+.problems li.warning { color: #b7791f; }
+
+.pinout { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
+.pane-head { padding: 10px 14px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+#pinout { flex: 1; width: 100%; min-height: 0; user-select: none; }
+#pinout .pin { cursor: pointer; }
+#pinout .pin:hover .pad { stroke: var(--accent); stroke-width: .35; }
+#pinout .pin, #pinout .pin:focus { outline: none; }
+#pinout .pin:focus-visible .pad { stroke: var(--accent); stroke-width: .5; }
+#pinout text { font-family: ui-monospace, Menlo, monospace; fill: var(--ink); }
+#pinout .pin.on text { fill: #2f9e5b; font-weight: 700; }
+
+.viewer .view-toggle { position: absolute; top: 12px; right: 12px; z-index: 1; background: var(--panel); }
+.viewer .view-toggle button { font-size: 12px; padding: 6px 10px; }
+
+@media (max-width: 1100px) {
+  .app { grid-template-columns: 320px 1fr; grid-template-rows: 1fr 1fr; }
+  .panel { grid-row: span 2; }
+}
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
+  .panel { grid-row: auto; }
+  .pinout { height: 70vh; border-right: 0; }
+  .viewer { order: 0; height: 45vh; }
+}

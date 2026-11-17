@@ -22,6 +22,15 @@ module.exports = function mountGarden(app) {
   garden.use('/api/labels', require('./labels/server.cjs')(
     process.env.GARDEN_LABELS_DIR || path.join(__dirname, '..', 'server', 'data', 'garden', 'labels')));
 
+  // Dupont clip frame page: static, client-side, plus saved board definitions
+  // as JSON files on the data volume (never farm.db).
+  garden.use('/dupont', express.static(path.join(__dirname, 'dupont'), {
+    index: 'index.html',
+    redirect: true,
+  }));
+  garden.use('/api/dupont', require('./dupont/server.cjs')(
+    process.env.GARDEN_DUPONT_DIR || path.join(__dirname, '..', 'server', 'data', 'garden', 'dupont')));
+
   // Batch Slice profiles and staged jobs share the garden data volume, not farm.db.
   garden.use('/api/batch-slice', require('./batch-slice/server.cjs')(
     require('../server/db'),

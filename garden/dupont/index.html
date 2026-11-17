@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dupont Clip Frames</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../labels/style.css">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "../labels/vendor/three.module.js" } }
+  </script>
+</head>
+<body>
+  <main class="app">
+    <aside class="panel">
+      <header>
+        <h1>Dupont Clip Frames</h1>
+        <p class="sub">Click the pins you are wiring. Download one frame that holds every Dupont plug and only fits the board one way.</p>
+      </header>
+
+      <section>
+        <label for="board-pick">Board</label>
+        <select id="board-pick"></select>
+        <label for="name" class="hint">Name</label>
+        <input id="name" type="text" autocomplete="off" spellcheck="false">
+        <div class="btn-row">
+          <button id="save" class="ghost">Save</button>
+          <button id="delete" class="ghost">Delete</button>
+          <button id="export" class="ghost">Export .json</button>
+          <button id="import" class="ghost">Open .json</button>
+          <input id="import-file" type="file" accept=".json,application/json" hidden>
+        </div>
+        <p id="board-note" class="hint"></p>
+      </section>
+
+      <section>
+        <span class="label">Pins</span>
+        <div class="pattern"><span>Left</span><code id="pat-left"></code></div>
+        <div class="pattern"><span>Right</span><code id="pat-right"></code></div>
+        <div class="btn-row">
+          <button class="ghost" data-fill="left:1">Left all</button>
+          <button class="ghost" data-fill="left:0">Left none</button>
+          <button class="ghost" data-fill="right:1">Right all</button>
+          <button class="ghost" data-fill="right:0">Right none</button>
+        </div>
+        <details id="labels-box">
+          <summary>Edit pin labels</summary>
+          <label class="inline">Pins per row <input id="pin-count" type="number" min="1" max="60" step="1"></label>
+          <p class="hint">Top to bottom as drawn: the first row is the far end, the last row is next to the USB connector.</p>
+          <table class="pin-table">
+            <thead><tr><th>#</th><th>Left</th><th>Right</th></tr></thead>
+            <tbody id="pin-rows"></tbody>
+          </table>
+        </details>
+      </section>
+
+      <section>
+        <details id="measure-box">
+          <summary>Board measurements (mm)</summary>
+          <div class="fields">
+            <label class="inline">Length, USB edge to far edge <input data-k="length" type="number" step="0.1"></label>
+            <label class="inline">Width <input data-k="width" type="number" step="0.1"></label>
+            <label class="inline">Header rows, center to center <input data-k="rowSpacing" type="number" step="0.1"></label>
+            <label class="inline">Pin pitch <input data-k="pitch" type="number" step="0.01"></label>
+            <label class="inline">Far edge (not USB) to center of pin 1 <input data-k="farEdgeToPin1" type="number" step="0.05" placeholder="centered"></label>
+            <p class="hint">Measure from the edge opposite the USB connector to the middle of the first pin. Every other pin is placed from this one at exact pitch. Blank centers the rows.</p>
+            <span class="label">Header pins point</span>
+            <div class="seg" id="headers">
+              <button data-v="down">Down (wires under the board)</button>
+              <button data-v="up">Up (wires on top)</button>
+            </div>
+            <label class="inline">Header plastic height <input data-k="headerHeight" type="number" step="0.1"></label>
+            <p class="hint">The black plastic strip on the header pins. The frame rests on it, so the corner standoffs are this tall.</p>
+            <label class="check"><input id="holes-on" type="checkbox"> Corner mounting holes</label>
+            <label class="inline">Hole diameter <input data-k="holes.diameter" type="number" step="0.01"></label>
+            <label class="inline">Board edge to hole edge <input data-k="holes.edgeGap" type="number" step="0.1"></label>
+          </div>
+        </details>
+        <details>
+          <summary>Clip details (mm)</summary>
+          <div class="fields">
+            <label class="inline">Clip height <input data-k="clip.height" type="number" step="0.1"></label>
+            <label class="inline">Wall <input data-k="clip.wall" type="number" step="0.1"></label>
+            <label class="inline">Dupont housing <input data-k="clip.pinSize" type="number" step="0.01"></label>
+            <label class="inline">Slot clearance, wired pins <input data-k="clip.busClearance" type="number" step="0.05"></label>
+            <label class="inline">Hole size, unused pins <input data-k="clip.blankHole" type="number" step="0.05"></label>
+            <label class="inline">Post height <input data-k="clip.postHeight" type="number" step="0.1"></label>
+            <label class="inline">Post clearance <input data-k="clip.postClearance" type="number" step="0.05"></label>
+            <button id="reset-clip" class="ghost">Reset clip details</button>
+          </div>
+        </details>
+      </section>
+
+      <ul id="problems" class="problems"></ul>
+
+      <section class="actions">
+        <button id="dl-stl" class="primary">Download STL</button>
+        <p id="status" class="hint" role="status"></p>
+      </section>
+
+      <section id="send" hidden>
+        <span class="label">Send to Print Garden</span>
+        <label for="project" class="hint">Project name</label>
+        <input id="project" type="text" autocomplete="off">
+        <button id="send-btn">Slice &amp; queue</button>
+        <p id="send-status" class="hint"></p>
+      </section>
+    </aside>
+
+    <section class="pinout">
+      <div class="pane-head">Top view, component side up. Click a pin or its name.</div>
+      <svg id="pinout" role="img" aria-label="Board pinout"></svg>
+    </section>
+
+    <section class="viewer">
+      <div class="seg view-toggle" id="view-mode">
+        <button data-v="use" aria-pressed="true">On the board</button>
+        <button data-v="print" aria-pressed="false">As printed</button>
+      </div>
+      <canvas id="view"></canvas>
+      <div id="dims" class="dims"></div>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

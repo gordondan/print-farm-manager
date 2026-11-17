@@ -7,6 +7,7 @@ wall so pulling upstream updates stays a clean rebase.
 | Plot | URL | What |
 |---|---|---|
 | `labels/` | `/labels` (in the app shell), `/garden/labels/` (standalone), `/garden/api/labels` (job queue) | Multibin label generator → STL / 3MF, or **Send to Print Garden** (slice + queue) |
+| `dupont/` | `/dupont` (in the app shell), `/garden/dupont/` (standalone), `/garden/api/dupont` (saved boards) | Dupont clip frame generator: click pins on a board diagram, download one C-shaped frame STL, or send it through the Labels slicing queue |
 | `batch-slice/` | `/batch-slice`, `/garden/api/batch-slice` | Browser uploads or approved Mac folders, Print Garden managed Orca profiles, progress and draft project import |
 | `fleet/` | "Next:" line on each Fleet card, `/garden/api/fleet/next-jobs` | Read-only preview of what each printer would be dispatched next. Mirrors the scheduler's candidate walk; its test compares against `_reserveJob`, so run it after every rebase. |
 
@@ -23,7 +24,7 @@ wall so pulling upstream updates stays a clean rebase.
    |---|---|
    | `server/index.js` | `require('../garden')(app);` before the SPA static/catch-all |
    | `Dockerfile` | `COPY garden ./garden` in the runtime stage |
-   | `client/src/App.jsx` | `Labels` nav item + a `/labels` route that iframes `/garden/labels/?embed` |
+   | `client/src/App.jsx` | `Labels` and `Dupont Clips` nav items + `/labels` and `/dupont` routes that iframe `/garden/labels/?embed` and `/garden/dupont/?embed` |
    | `client/src/pages/Fleet.jsx` | imports `../garden/NextJobLine` and renders `<NextJobLine printerId={printer.id} />` as the last child of `PrinterCard` |
    | `docker-compose.yml` | joins the external `cloudflare-tunnel` network (deploy config) |
 
@@ -93,6 +94,7 @@ jobs and uploads are persisted in the existing `farm-data` volume under
 ```bash
 node --test garden/labels/tests/*.test.mjs   # garden plots (node:test); the queue API
                                               # test needs express, so run it in the deps image
+node --test garden/dupont/tests/*.test.mjs   # geometry runs anywhere; the board API test needs express
 node --test garden/fleet/tests/*.test.mjs    # needs better-sqlite3 + express: deps image
 npm test                                      # upstream server suite (jest), untouched
 ```

@@ -2,6 +2,46 @@
 
 ---
 
+## 2026-11-17: Dupont Clips pin placement and clearances
+
+The first test frame would not go onto the board. The pin rows were centered
+on the board, but on the ESP32 DevKit pin 1 is 6 mm from the far (non-USB)
+edge, so every slot was about 2 mm off. Boards now record the far-edge to
+pin 1 distance, and every pin is placed from that one anchor at an exact
+multiple of the pitch. Wired pin slots grow from 2.94 to 3.04 mm and unused
+pin holes shrink from 1.78 to 1.2 mm, which leaves a printable 0.42 mm fin
+between them. The standoff collar under each corner post now shrinks to clear
+pin 1's header plastic, and only the post core is sunk into the frame so the
+collar can not intrude into a slot. Saved or draft boards from the first
+version are converted on load. Not yet test printed.
+
+### Changes
+- `garden/dupont/lib/clipgen.js`: `farEdgeToPin1` anchor, `blankHole` size, collar sizing, fin warning, v1 conversion.
+- `garden/dupont/index.html`, `garden/dupont/app.js`: new measurement and clearance fields; the diagram shows the pin 1 distance.
+- `garden/dupont/tests/clipgen.test.mjs`: exact pitch, clearance, collar, and migration tests.
+- `garden/dupont/README.md`: frame and board file notes.
+
+## 2026-11-16: Dupont Clips page
+
+The `dupont-clip-gen.py` script made one clip bar per header row from a typed
+`1`/`0` pattern, so a dev board needed two separate prints that could each go
+on either way round. The new Dupont Clips page (garden plot, sidebar under
+Labels) shows a top-view pinout of a board, lets you click the pins you are
+wiring, and generates a single frame: both clip rails joined by a crossbar at
+the far end, open at the USB end, with corner posts on header-height standoffs
+that drop into the board's mounting holes. The open end and the posts make the
+frame fit only one way. Board definitions (measurements, pin labels, selected
+pins) are saved as JSON files on the data volume or exported and opened as
+files; the ESP32 DevKit 30 pin board is built in. The frame can be downloaded
+as an STL or sent through the existing Labels slicing queue. Not yet test
+printed against a real board.
+
+### Changes
+- `garden/dupont/`: page, geometry library (`lib/clipgen.js`), saved board API (`server.cjs`), tests, and README.
+- `garden/index.js`: mounts `/garden/dupont` and `/garden/api/dupont`.
+- `client/src/App.jsx`: `Dupont Clips` nav item and `/dupont` route.
+- `garden/README.md`: plot table, hook table, and test commands.
+
 ## 2026-10-07: Batch Slice in Print Garden
 
 Batch Slicer is integrated into Print Garden as a page under Labels. The
